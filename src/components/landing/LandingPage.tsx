@@ -96,14 +96,21 @@ const TESTIMONIALS = [
 ];
 
 // ─── Mobile Bottom Nav ────────────────────────────────────────────────────────
-function MobileBottomNav() {
-  const items = [
-    { icon: faHouse,  label: "Home",     href: "#",          highlight: false },
-    { icon: faBolt,   label: "Features", href: "#features",  highlight: false },
-    { icon: faTag,    label: "Pricing",  href: "#pricing",   highlight: false },
-    { icon: faUser,   label: "Login",    href: "/login",     highlight: false },
-    { icon: faRocket, label: "Start",    href: "/register",  highlight: true  },
-  ];
+function MobileBottomNav({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: string }) {
+  const items = isLoggedIn
+    ? [
+        { icon: faHouse,     label: "Home",      href: "#",         highlight: false },
+        { icon: faBolt,      label: "Features",  href: "#features", highlight: false },
+        { icon: faTag,       label: "Pricing",   href: "#pricing",  highlight: false },
+        { icon: faRocket,    label: "Dashboard", href: dashHref,    highlight: true  },
+      ]
+    : [
+        { icon: faHouse,  label: "Home",     href: "#",          highlight: false },
+        { icon: faBolt,   label: "Features", href: "#features",  highlight: false },
+        { icon: faTag,    label: "Pricing",  href: "#pricing",   highlight: false },
+        { icon: faUser,   label: "Login",    href: "/login",     highlight: false },
+        { icon: faRocket, label: "Start",    href: "/register",  highlight: true  },
+      ];
 
   return (
     <div className="md:hidden fixed bottom-0 inset-x-0 z-50 bg-white border-t shadow-2xl"
@@ -133,7 +140,7 @@ function MobileBottomNav() {
 }
 
 // ─── Navbar ───────────────────────────────────────────────────────────────────
-function Navbar() {
+function Navbar({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: string }) {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -179,18 +186,30 @@ function Navbar() {
         </div>
 
         <div className="hidden md:flex items-center gap-3">
-          <Link href="/login"
-            className={cn("text-sm font-medium px-4 py-2 rounded-xl transition-colors",
-              scrolled ? "text-slate-700 hover:bg-slate-100" : "text-white/90 hover:bg-white/10")}
-          >
-            Login
-          </Link>
-          <Link href="/register"
-            className="text-sm font-semibold px-5 py-2 rounded-xl text-white transition-all hover:brightness-110"
-            style={{ background: "#25D366" }}
-          >
-            Get Started Free
-          </Link>
+          {isLoggedIn ? (
+            <Link href={dashHref}
+              className="text-sm font-semibold px-5 py-2 rounded-xl text-white transition-all hover:brightness-110 flex items-center gap-2"
+              style={{ background: "#25D366" }}
+            >
+              <FontAwesomeIcon icon={faRocket} className="w-3.5 h-3.5" />
+              Go to Dashboard
+            </Link>
+          ) : (
+            <>
+              <Link href="/login"
+                className={cn("text-sm font-medium px-4 py-2 rounded-xl transition-colors",
+                  scrolled ? "text-slate-700 hover:bg-slate-100" : "text-white/90 hover:bg-white/10")}
+              >
+                Login
+              </Link>
+              <Link href="/register"
+                className="text-sm font-semibold px-5 py-2 rounded-xl text-white transition-all hover:brightness-110"
+                style={{ background: "#25D366" }}
+              >
+                Get Started Free
+              </Link>
+            </>
+          )}
         </div>
 
         <button
@@ -210,8 +229,14 @@ function Navbar() {
             </a>
           ))}
           <div className="flex flex-col gap-2 pt-2 border-t">
-            <Link href="/login" className="text-center py-2.5 text-sm font-medium border border-slate-200 rounded-xl text-slate-700">Login</Link>
-            <Link href="/register" className="text-center py-2.5 text-sm font-semibold rounded-xl text-white" style={{ background: "#25D366" }}>Get Started Free</Link>
+            {isLoggedIn ? (
+              <Link href={dashHref} className="text-center py-2.5 text-sm font-semibold rounded-xl text-white" style={{ background: "#25D366" }}>Go to Dashboard</Link>
+            ) : (
+              <>
+                <Link href="/login" className="text-center py-2.5 text-sm font-medium border border-slate-200 rounded-xl text-slate-700">Login</Link>
+                <Link href="/register" className="text-center py-2.5 text-sm font-semibold rounded-xl text-white" style={{ background: "#25D366" }}>Get Started Free</Link>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -220,7 +245,7 @@ function Navbar() {
 }
 
 // ─── Hero ─────────────────────────────────────────────────────────────────────
-function Hero() {
+function Hero({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: string }) {
   return (
     <section className="relative min-h-screen flex flex-col justify-center overflow-hidden pt-16" style={{ background: "#0b1d14" }}>
       <div className="absolute inset-0 pointer-events-none">
@@ -251,21 +276,33 @@ function Hero() {
         </p>
 
         <div className="flex flex-col sm:flex-row items-center gap-4">
-          <Link href="/register"
-            className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-bold text-white transition-all hover:brightness-110 shadow-lg"
-            style={{ background: "#25D366", boxShadow: "0 0 30px #25D36650" }}
-          >
-            Get Started Free
-            <FontAwesomeIcon icon={faArrowRight} className="w-4 h-4" />
-          </Link>
-          <Link href="/login"
-            className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-semibold text-white/80 border border-white/20 hover:bg-white/10 transition-all"
-          >
-            Login to Dashboard
-          </Link>
+          {isLoggedIn ? (
+            <Link href={dashHref}
+              className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-bold text-white transition-all hover:brightness-110 shadow-lg"
+              style={{ background: "#25D366", boxShadow: "0 0 30px #25D36650" }}
+            >
+              <FontAwesomeIcon icon={faRocket} className="w-4 h-4" />
+              Go to Dashboard
+            </Link>
+          ) : (
+            <>
+              <Link href="/register"
+                className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-bold text-white transition-all hover:brightness-110 shadow-lg"
+                style={{ background: "#25D366", boxShadow: "0 0 30px #25D36650" }}
+              >
+                Get Started Free
+                <FontAwesomeIcon icon={faArrowRight} className="w-4 h-4" />
+              </Link>
+              <Link href="/login"
+                className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-semibold text-white/80 border border-white/20 hover:bg-white/10 transition-all"
+              >
+                Login to Dashboard
+              </Link>
+            </>
+          )}
         </div>
 
-        <p className="text-sm text-white/30">No credit card required · Free 14-day trial</p>
+        <p className="text-sm text-white/30">{isLoggedIn ? "Welcome back! Your dashboard is ready." : "No credit card required · Free 14-day trial"}</p>
 
         <div className="w-full max-w-5xl mt-6 rounded-2xl overflow-hidden shadow-2xl border border-white/10"
           style={{ background: "#0f2318" }}>
@@ -596,31 +633,46 @@ function TrustBadges() {
 }
 
 // ─── CTA ──────────────────────────────────────────────────────────────────────
-function CTA() {
+function CTA({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: string }) {
   return (
     <section className="py-24" style={{ background: "#0b1d14" }}>
       <div className="max-w-3xl mx-auto px-6 text-center">
         <h2 className="text-4xl font-extrabold text-white mb-4">
-          Ready to grow your business on WhatsApp?
+          {isLoggedIn ? "Welcome back to ChatFlow!" : "Ready to grow your business on WhatsApp?"}
         </h2>
         <p className="text-lg text-white/50 mb-10">
-          Join 10,000+ businesses already using ChatFlow to connect with their customers.
+          {isLoggedIn
+            ? "Your dashboard is ready. Pick up where you left off."
+            : "Join 10,000+ businesses already using ChatFlow to connect with their customers."}
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <Link
-            href="/register"
-            className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-bold text-white transition-all hover:brightness-110"
-            style={{ background: "#25D366", boxShadow: "0 0 30px #25D36640" }}
-          >
-            Start Free Trial
-            <FontAwesomeIcon icon={faArrowRight} className="w-4 h-4" />
-          </Link>
-          <Link
-            href="/login"
-            className="px-8 py-4 rounded-2xl text-base font-semibold text-white/70 border border-white/20 hover:bg-white/10 transition-all"
-          >
-            Already have an account?
-          </Link>
+          {isLoggedIn ? (
+            <Link
+              href={dashHref}
+              className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-bold text-white transition-all hover:brightness-110"
+              style={{ background: "#25D366", boxShadow: "0 0 30px #25D36640" }}
+            >
+              <FontAwesomeIcon icon={faRocket} className="w-4 h-4" />
+              Go to Dashboard
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/register"
+                className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-bold text-white transition-all hover:brightness-110"
+                style={{ background: "#25D366", boxShadow: "0 0 30px #25D36640" }}
+              >
+                Start Free Trial
+                <FontAwesomeIcon icon={faArrowRight} className="w-4 h-4" />
+              </Link>
+              <Link
+                href="/login"
+                className="px-8 py-4 rounded-2xl text-base font-semibold text-white/70 border border-white/20 hover:bg-white/10 transition-all"
+              >
+                Already have an account?
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </section>
@@ -681,20 +733,27 @@ function Footer() {
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export default function LandingPage() {
+export default function LandingPage({
+  isLoggedIn = false,
+  isSuperAdmin = false,
+}: {
+  isLoggedIn?: boolean;
+  isSuperAdmin?: boolean;
+}) {
+  const dashHref = isSuperAdmin ? "/admin" : "/dashboard";
   return (
     <div className="min-h-screen">
-      <Navbar />
-      <Hero />
+      <Navbar isLoggedIn={isLoggedIn} dashHref={dashHref} />
+      <Hero isLoggedIn={isLoggedIn} dashHref={dashHref} />
       <Stats />
       <Features />
       <HowItWorks />
       <Testimonials />
       <TrustBadges />
       <Pricing />
-      <CTA />
+      <CTA isLoggedIn={isLoggedIn} dashHref={dashHref} />
       <Footer />
-      <MobileBottomNav />
+      <MobileBottomNav isLoggedIn={isLoggedIn} dashHref={dashHref} />
     </div>
   );
 }
