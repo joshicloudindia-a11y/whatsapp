@@ -1,34 +1,33 @@
-import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { getToken } from "next-auth/jwt";
 
-export default withAuth(
-  function middleware(req) {
+const PUBLIC_PATHS = ["/", "/login", "/register", "/forgot-password", "/reset-password", "/verify-email"];
+const PUBLIC_API  = ["/api/auth", "/api/webhook", "/api/plans"];
+
+export async function proxy(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+
+  if (
+    PUBLIC_PATHS.some(p => pathname === p || pathname.startsWith(p + "/")) ||
+    PUBLIC_API.some(p => pathname.startsWith(p))
+  ) {
     return NextResponse.next();
-  },
-  {
-    callbacks: {
-      authorized: ({ token, req }) => {
-        const { pathname } = req.nextUrl;
-        // Public routes
-        if (
-          pathname === "/" ||
-          pathname.startsWith("/login") ||
-          pathname.startsWith("/register") ||
-          pathname.startsWith("/forgot-password") ||
-          pathname.startsWith("/reset-password") ||
-          pathname.startsWith("/verify-email") ||
-          pathname.startsWith("/api/auth") ||
-          pathname.startsWith("/api/webhook") ||
-          pathname.startsWith("/api/plans")
-        ) {
-          return true;
-        }
-        // Protected routes require auth
-        return !!token;
-      },
-    },
   }
-);
+
+  const token = await getToken({
+    req,
+    secret: process.env.NEXTAUTH_SECRET ?? process.env.AUTH_SECRET,
+  });
+
+  if (!token) {
+    const loginUrl = new URL("/login", req.url);
+    loginUrl.searchParams.set("callbackUrl", req.url);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  return NextResponse.next();
+}
 
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
