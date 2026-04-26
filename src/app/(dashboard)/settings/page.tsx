@@ -7,7 +7,7 @@ import axios from "axios";
 import { cn, timeAgo, getInitials } from "@/lib/utils";
 import { toast } from "sonner";
 
-type Tab = "profile" | "organization" | "whatsapp" | "team" | "api-keys" | "billing";
+type Tab = "profile" | "organization" | "team" | "api-keys" | "billing";
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>("profile");
@@ -16,11 +16,10 @@ export default function SettingsPage() {
 
   const tabs: { id: Tab; label: string; adminOnly?: boolean }[] = [
     { id: "profile",      label: "My Profile" },
-    { id: "organization", label: "Organization" },
-    { id: "whatsapp",     label: "WhatsApp" },
-    { id: "team",         label: "Team" },
-    { id: "api-keys",     label: "API Keys" },
-    { id: "billing",      label: "My Subscription",  adminOnly: true },
+    { id: "organization", label: "Organization",  adminOnly: true },
+    { id: "team",         label: "Team",          adminOnly: true },
+    { id: "api-keys",     label: "API Keys",      adminOnly: true },
+    { id: "billing",      label: "My Subscription" },
   ];
 
   return (
@@ -44,11 +43,10 @@ export default function SettingsPage() {
 
       <div className="flex-1 p-6 overflow-auto">
         {tab === "profile"      && <ProfileSettings />}
-        {tab === "organization" && <OrgSettings />}
-        {tab === "whatsapp"     && <WhatsappSettings />}
-        {tab === "team"         && <TeamSettings />}
-        {tab === "api-keys"     && <ApiKeysSettings />}
-        {tab === "billing"      && isAdmin && <MySubscription />}
+        {tab === "organization" && isAdmin && <OrgSettings />}
+        {tab === "team"         && isAdmin && <TeamSettings />}
+        {tab === "api-keys"     && isAdmin && <ApiKeysSettings />}
+        {tab === "billing"      && <MySubscription />}
       </div>
     </div>
   );
@@ -226,160 +224,6 @@ function OrgSettings() {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-// ─── WhatsApp Settings ────────────────────────────────────────────────────────
-
-function WhatsappSettings() {
-  const EMPTY = { phoneNumber: "", phoneNumberId: "", displayName: "", wabaId: "", accessToken: "" };
-  const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm]       = useState({ ...EMPTY });
-  const [deleting, setDeleting] = useState<string | null>(null);
-
-  const { data, refetch } = useQuery({
-    queryKey: ["whatsapp-accounts"],
-    queryFn: () => axios.get("/api/settings/whatsapp").then((r) => r.data),
-  });
-
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await axios.post("/api/settings/whatsapp", form);
-      toast.success("WhatsApp number connected");
-      setShowAdd(false);
-      setForm({ ...EMPTY });
-      refetch();
-    } catch (e: any) {
-      toast.error(e.response?.data?.error ?? "Failed");
-    }
-  };
-
-  const handleToggle = async (acc: any) => {
-    try {
-      await axios.patch(`/api/settings/whatsapp/${acc.id}`, { isActive: !acc.isActive });
-      toast.success(acc.isActive ? "Number deactivated" : "Number activated");
-      refetch();
-    } catch {
-      toast.error("Update failed");
-    }
-  };
-
-  const handleDelete = async (acc: any) => {
-    if (!confirm(`Disconnect "${acc.displayName}"? This will also remove all associated conversations.`)) return;
-    setDeleting(acc.id);
-    try {
-      await axios.delete(`/api/settings/whatsapp/${acc.id}`);
-      toast.success("Number disconnected");
-      refetch();
-    } catch {
-      toast.error("Delete failed");
-    } finally {
-      setDeleting(null);
-    }
-  };
-
-  const FIELDS = [
-    { key: "phoneNumber",   label: "Phone Number",              placeholder: "e.g. 919876543210 (with country code, no +)" },
-    { key: "phoneNumberId", label: "Phone Number ID ★",         placeholder: "From Meta → WhatsApp → API Setup (e.g. 123456789012345)" },
-    { key: "displayName",   label: "Display Name",              placeholder: "Your Business Name" },
-    { key: "wabaId",        label: "WABA ID",                   placeholder: "WhatsApp Business Account ID from Meta Business Manager" },
-  ];
-
-  return (
-    <div className="max-w-2xl space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900">WhatsApp Numbers</h2>
-          <p className="text-sm text-slate-500">Connected WhatsApp Business accounts</p>
-        </div>
-        <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 text-sm font-medium text-white rounded-lg" style={{ background: "#25D366" }}>
-          + Connect Number
-        </button>
-      </div>
-
-      {/* Where to find these IDs */}
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-blue-800 space-y-1">
-        <p className="font-semibold">Where to find your Meta credentials:</p>
-        <p>1. Go to <strong>developers.facebook.com</strong> → Your App → WhatsApp → API Setup</p>
-        <p>2. <strong>Phone Number ID</strong> — shown under "From" phone number (e.g. 123456789012345)</p>
-        <p>3. <strong>WABA ID</strong> — shown as "WhatsApp Business Account ID"</p>
-        <p>4. <strong>Access Token</strong> — Generate a Permanent Token via System User in Meta Business Manager</p>
-        <p>5. <strong>Webhook URL</strong> — <code className="bg-blue-100 px-1 rounded">{process.env.NEXT_PUBLIC_APP_URL ?? "https://yourdomain.com"}/api/webhook/whatsapp</code></p>
-        <p>6. <strong>Verify Token</strong> — <code className="bg-blue-100 px-1 rounded">whatsapp_webhook_verify_2024_secure</code></p>
-      </div>
-
-      {(!data?.accounts || data.accounts.length === 0) && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-700">
-          No WhatsApp number connected yet. Click "+ Connect Number" and enter your Meta credentials.
-        </div>
-      )}
-
-      <div className="space-y-3">
-        {data?.accounts?.map((acc: any) => (
-          <div key={acc.id} className="bg-white rounded-xl border p-4 space-y-3" style={{ borderColor: "#e2e8f0" }}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="font-semibold text-slate-900">{acc.displayName}</p>
-                <p className="text-sm text-slate-500">+{acc.phoneNumber}</p>
-                <div className="mt-1.5 space-y-0.5">
-                  <p className="text-xs text-slate-400 font-mono">Phone Number ID: {acc.phoneNumberId}</p>
-                  <p className="text-xs text-slate-400 font-mono">WABA ID: {acc.wabaId}</p>
-                </div>
-              </div>
-              <span className={cn("px-2 py-0.5 text-xs rounded-full font-medium shrink-0", acc.isActive ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500")}>
-                {acc.isActive ? "Active" : "Inactive"}
-              </span>
-            </div>
-            <div className="flex gap-2 pt-1 border-t" style={{ borderColor: "#f1f5f9" }}>
-              <button onClick={() => handleToggle(acc)}
-                className="flex-1 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 font-medium">
-                {acc.isActive ? "Deactivate" : "Activate"}
-              </button>
-              <button onClick={() => handleDelete(acc)} disabled={deleting === acc.id}
-                className="px-4 py-1.5 text-xs rounded-lg font-medium bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-50">
-                {deleting === acc.id ? "..." : "Disconnect"}
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {showAdd && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-auto">
-          <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4 my-4">
-            <h2 className="text-lg font-bold text-slate-900">Connect WhatsApp Number</h2>
-            <form onSubmit={handleAdd} className="space-y-3">
-              {FIELDS.map((f) => (
-                <div key={f.key} className="space-y-1">
-                  <label className="text-xs font-medium text-slate-600">{f.label}</label>
-                  <input required value={(form as any)[f.key]}
-                    onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
-                    placeholder={f.placeholder}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                </div>
-              ))}
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-600">Permanent Access Token ★</label>
-                <textarea required value={form.accessToken}
-                  onChange={(e) => setForm({ ...form, accessToken: e.target.value })}
-                  placeholder="EAAxxxxxxxx... (System User Permanent Token from Meta Business Manager)"
-                  rows={3}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-500" />
-              </div>
-              <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setShowAdd(false)}
-                  className="flex-1 py-2 text-sm border border-slate-200 rounded-lg text-slate-600">Cancel</button>
-                <button type="submit"
-                  className="flex-1 py-2 text-sm text-white rounded-lg font-medium" style={{ background: "#25D366" }}>
-                  Connect Number
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

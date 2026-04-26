@@ -10,12 +10,63 @@ const PLAN_COLORS: Record<string, string> = {
   TRIAL: "#94a3b8", GROWTH: "#22c55e", PRO: "#6366f1", BUSINESS: "#f59e0b",
 };
 
+const WA_EMPTY = { phoneNumber: "", phoneNumberId: "", displayName: "", wabaId: "", accessToken: "" };
+
 export default function AdminOrganizationsPage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [editOrg, setEditOrg] = useState<any | null>(null);
   const [planValue, setPlanValue] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // WhatsApp management state
+  const [waOrg, setWaOrg] = useState<any | null>(null);
+  const [waForm, setWaForm] = useState({ ...WA_EMPTY });
+  const [showWaForm, setShowWaForm] = useState(false);
+  const [waDeleting, setWaDeleting] = useState<string | null>(null);
+  const [waSaving, setWaSaving] = useState(false);
+
+  const { data: waOrgData, refetch: refetchWa } = useQuery({
+    queryKey: ["admin-org-detail", waOrg?.id],
+    queryFn: () => waOrg ? axios.get(`/api/admin/organizations/${waOrg.id}`).then((r) => r.data) : null,
+    enabled: !!waOrg,
+  });
+  const waAccounts: any[] = waOrgData?.organization?.whatsappAccounts ?? [];
+
+  const handleWaAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setWaSaving(true);
+    try {
+      await axios.post(`/api/admin/organizations/${waOrg.id}/whatsapp`, waForm);
+      toast.success("WhatsApp number connected");
+      setWaForm({ ...WA_EMPTY });
+      setShowWaForm(false);
+      refetchWa();
+    } catch (e: any) {
+      toast.error(e.response?.data?.error ?? "Failed");
+    } finally {
+      setWaSaving(false);
+    }
+  };
+
+  const handleWaToggle = async (acc: any) => {
+    try {
+      await axios.patch(`/api/admin/organizations/${waOrg.id}/whatsapp?accountId=${acc.id}`, { isActive: !acc.isActive });
+      toast.success(acc.isActive ? "Deactivated" : "Activated");
+      refetchWa();
+    } catch { toast.error("Update failed"); }
+  };
+
+  const handleWaDelete = async (acc: any) => {
+    if (!confirm(`Disconnect "${acc.displayName}"?`)) return;
+    setWaDeleting(acc.id);
+    try {
+      await axios.delete(`/api/admin/organizations/${waOrg.id}/whatsapp?accountId=${acc.id}`);
+      toast.success("Disconnected");
+      refetchWa();
+    } catch { toast.error("Failed"); }
+    finally { setWaDeleting(null); }
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ["admin-orgs", search],
@@ -118,6 +169,12 @@ export default function AdminOrganizationsPage() {
                       Change Plan
                     </button>
                     <button
+                      onClick={() => { setWaOrg(org); setShowWaForm(false); setWaForm({ ...WA_EMPTY }); }}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-green-200 text-green-700 hover:bg-green-50 font-medium"
+                    >
+                      WhatsApp
+                    </button>
+                    <button
                       onClick={() => deleteOrg(org)}
                       className="text-xs px-3 py-1.5 rounded-lg border border-red-100 text-red-500 hover:bg-red-50 font-medium"
                     >
@@ -130,6 +187,91 @@ export default function AdminOrganizationsPage() {
           </tbody>
         </table>
       </div>
+
+      {/* WhatsApp Management Modal */}
+      {waOrg && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-auto">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-5 my-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">WhatsApp Numbers</h3>
+                <p className="text-sm text-slate-500">{waOrg.name}</p>
+              </div>
+              <button onClick={() => setWaOrg(null)} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">×</button>
+            </div>
+
+            {/* Existing accounts */}
+            <div className="space-y-2">
+              {waAccounts.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-4">No WhatsApp numbers connected</p>
+              ) : waAccounts.map((acc: any) => (
+                <div key={acc.id} className="flex items-center justify-between gap-3 bg-slate-50 rounded-xl px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{acc.displayName || acc.phoneNumber}</p>
+                    <p className="text-xs text-slate-400 font-mono">+{acc.phoneNumber}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${acc.isActive ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-500"}`}>
+                      {acc.isActive ? "Active" : "Inactive"}
+                    </span>
+                    <button onClick={() => handleWaToggle(acc)}
+                      className="text-xs px-2 py-1 border border-slate-200 rounded-lg text-slate-600 hover:bg-white font-medium">
+                      {acc.isActive ? "Deactivate" : "Activate"}
+                    </button>
+                    <button onClick={() => handleWaDelete(acc)} disabled={waDeleting === acc.id}
+                      className="text-xs px-2 py-1 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 font-medium disabled:opacity-50">
+                      {waDeleting === acc.id ? "..." : "Remove"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {!showWaForm ? (
+              <button onClick={() => setShowWaForm(true)}
+                className="w-full py-2.5 text-sm font-medium text-white rounded-xl"
+                style={{ background: "#25D366" }}>
+                + Connect New Number
+              </button>
+            ) : (
+              <form onSubmit={handleWaAdd} className="space-y-3 border-t pt-4" style={{ borderColor: "#e2e8f0" }}>
+                <p className="text-sm font-semibold text-slate-900">Connect WhatsApp Number</p>
+                {[
+                  { key: "phoneNumber",   label: "Phone Number",   placeholder: "919876543210 (no +)" },
+                  { key: "phoneNumberId", label: "Phone Number ID ★", placeholder: "From Meta API Setup" },
+                  { key: "displayName",   label: "Display Name",   placeholder: "Business Name" },
+                  { key: "wabaId",        label: "WABA ID",        placeholder: "WhatsApp Business Account ID" },
+                ].map((f) => (
+                  <div key={f.key} className="space-y-1">
+                    <label className="text-xs font-medium text-slate-600">{f.label}</label>
+                    <input required value={(waForm as any)[f.key]}
+                      onChange={(e) => setWaForm({ ...waForm, [f.key]: e.target.value })}
+                      placeholder={f.placeholder}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                  </div>
+                ))}
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-600">Permanent Access Token ★</label>
+                  <textarea required value={waForm.accessToken}
+                    onChange={(e) => setWaForm({ ...waForm, accessToken: e.target.value })}
+                    placeholder="EAAxxxxxxxx..."
+                    rows={2}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-500" />
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setShowWaForm(false)}
+                    className="flex-1 py-2 text-sm border border-slate-200 rounded-lg text-slate-600">Cancel</button>
+                  <button type="submit" disabled={waSaving}
+                    className="flex-1 py-2 text-sm text-white rounded-lg font-medium disabled:opacity-60"
+                    style={{ background: "#25D366" }}>
+                    {waSaving ? "Connecting..." : "Connect"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Change Plan Modal */}
       {editOrg && (
