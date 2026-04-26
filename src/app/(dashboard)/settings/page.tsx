@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useSession } from "next-auth/react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { cn, timeAgo, getInitials } from "@/lib/utils";
 import { toast } from "sonner";
@@ -188,6 +188,11 @@ function ProfileSettings() {
 
 function OrgSettings() {
   const { data: session } = useSession();
+  const { data: subData } = useQuery({
+    queryKey: ["subscription"],
+    queryFn: () => axios.get("/api/settings/subscription").then((r) => r.data),
+  });
+
   return (
     <div className="max-w-lg space-y-6">
       <div>
@@ -206,9 +211,20 @@ function OrgSettings() {
         <div className="space-y-1">
           <label className="text-xs font-medium text-slate-600">Current Plan</label>
           <div className="flex items-center gap-2">
-            <span className="px-3 py-1 text-sm font-medium bg-green-100 text-green-700 rounded-full">BUSINESS</span>
+            <span className="px-3 py-1 text-sm font-medium bg-green-100 text-green-700 rounded-full">
+              {subData?.plan ?? "—"}
+            </span>
+            {subData?.status && (
+              <span className="text-xs text-slate-400">{subData.status}</span>
+            )}
           </div>
         </div>
+        {subData?.trialEndsAt && (
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-slate-600">Trial Ends</label>
+            <p className="text-sm text-slate-700">{new Date(subData.trialEndsAt).toLocaleDateString()}</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -508,375 +524,115 @@ function ApiKeysSettings() {
   );
 }
 
-// ─── Billing Admin — Full CRUD ────────────────────────────────────────────────
+// ─── My Subscription ─────────────────────────────────────────────────────────
 
-const EMPTY_PLAN = {
-  name: "", slug: "", description: "",
-  monthlyPrice: "", annualPrice: "", currency: "USD",
-  isActive: true, isPopular: false, sortOrder: "0",
-  maxUsers: "3", maxBroadcasts: "15000", maxAutomations: "1000",
-  maxApiCalls: "10000", maxAiCredits: "250", maxWhatsappNumbers: "1",
-  features: "",
-};
-
-function BillingAdminSettings() {
-  const queryClient = useQueryClient();
-  const [showForm, setShowForm]     = useState(false);
-  const [editingId, setEditingId]   = useState<string | null>(null);
-  const [form, setForm]             = useState({ ...EMPTY_PLAN });
-  const [deleting, setDeleting]     = useState<string | null>(null);
-  const [saving, setSaving]         = useState(false);
-
-  const { data, isLoading } = useQuery({
-    queryKey: ["admin-plans"],
-    queryFn: () => axios.get("/api/admin/plans").then((r) => r.data),
+function MySubscription() {
+  const { data: subData } = useQuery({
+    queryKey: ["subscription"],
+    queryFn: () => axios.get("/api/settings/subscription").then((r) => r.data),
+  });
+  const { data } = useQuery({
+    queryKey: ["public-plans"],
+    queryFn: () => axios.get("/api/plans").then((r) => r.data),
   });
 
+  const currentPlan: string = subData?.plan ?? "TRIAL";
   const plans: any[] = data?.plans ?? [];
 
-  const openCreate = () => {
-    setEditingId(null);
-    setForm({ ...EMPTY_PLAN });
-    setShowForm(true);
-  };
-
-  const openEdit = (plan: any) => {
-    setEditingId(plan.id);
-    setForm({
-      name: plan.name,
-      slug: plan.slug,
-      description: plan.description ?? "",
-      monthlyPrice: String(plan.monthlyPrice),
-      annualPrice: String(plan.annualPrice),
-      currency: plan.currency,
-      isActive: plan.isActive,
-      isPopular: plan.isPopular,
-      sortOrder: String(plan.sortOrder),
-      maxUsers: String(plan.maxUsers),
-      maxBroadcasts: String(plan.maxBroadcasts),
-      maxAutomations: String(plan.maxAutomations),
-      maxApiCalls: String(plan.maxApiCalls),
-      maxAiCredits: String(plan.maxAiCredits),
-      maxWhatsappNumbers: String(plan.maxWhatsappNumbers),
-      features: Array.isArray(plan.features) ? plan.features.join("\n") : "",
-    });
-    setShowForm(true);
-  };
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    const payload = {
-      ...form,
-      features: form.features.split("\n").map((s) => s.trim()).filter(Boolean),
-    };
-    try {
-      if (editingId) {
-        await axios.patch(`/api/admin/plans/${editingId}`, payload);
-        toast.success("Plan updated");
-      } else {
-        await axios.post("/api/admin/plans", payload);
-        toast.success("Plan created");
-      }
-      queryClient.invalidateQueries({ queryKey: ["admin-plans"] });
-      setShowForm(false);
-    } catch (e: any) {
-      toast.error(e.response?.data?.error ?? "Failed");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Delete plan "${name}"? This cannot be undone.`)) return;
-    setDeleting(id);
-    try {
-      await axios.delete(`/api/admin/plans/${id}`);
-      toast.success("Plan deleted");
-      queryClient.invalidateQueries({ queryKey: ["admin-plans"] });
-    } catch {
-      toast.error("Delete failed");
-    } finally {
-      setDeleting(null);
-    }
-  };
-
-  const toggleField = async (id: string, field: "isActive" | "isPopular", value: boolean) => {
-    await axios.patch(`/api/admin/plans/${id}`, { [field]: !value });
-    queryClient.invalidateQueries({ queryKey: ["admin-plans"] });
+  const PLAN_COLORS: Record<string, string> = {
+    TRIAL: "#64748b", GROWTH: "#3b82f6", PRO: "#8b5cf6", BUSINESS: "#25D366",
   };
 
   return (
-    <div className="max-w-5xl space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900">Plans & Billing</h2>
-          <p className="text-sm text-slate-500">Manage subscription plans shown to customers</p>
-        </div>
-        <button onClick={openCreate} className="px-4 py-2 text-sm font-medium text-white rounded-lg" style={{ background: "#25D366" }}>
-          + Add Plan
-        </button>
+    <div className="max-w-3xl space-y-6">
+      <div>
+        <h2 className="text-lg font-bold text-slate-900">My Subscription</h2>
+        <p className="text-sm text-slate-500">Your current plan and available upgrades</p>
       </div>
 
-      {isLoading ? (
-        <div className="text-center py-12 text-slate-400 text-sm">Loading plans...</div>
-      ) : plans.length === 0 ? (
-        <div className="text-center py-16 border-2 border-dashed rounded-2xl border-slate-200">
-          <p className="text-slate-500 font-medium">No plans yet</p>
-          <p className="text-slate-400 text-sm mt-1">Create your first pricing plan</p>
-          <button onClick={openCreate} className="mt-4 px-4 py-2 text-sm font-medium text-white rounded-lg" style={{ background: "#25D366" }}>
-            + Create Plan
-          </button>
+      {/* Current plan card */}
+      <div className="bg-white rounded-xl border p-5 flex items-center gap-4" style={{ borderColor: "#e2e8f0" }}>
+        <div
+          className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg shrink-0"
+          style={{ background: PLAN_COLORS[currentPlan] ?? "#25D366" }}
+        >
+          {currentPlan[0]}
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {plans.map((plan) => (
-            <div
-              key={plan.id}
-              className={cn("bg-white rounded-xl border p-5 relative flex flex-col gap-3",
-                plan.isPopular ? "ring-2" : ""
-              )}
-              style={{ borderColor: "#e2e8f0", ...(plan.isPopular ? { ringColor: "#25D366" } : {}) }}
-            >
-              {plan.isPopular && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 text-xs font-bold text-white rounded-full" style={{ background: "#25D366" }}>
-                  Best Value
-                </div>
-              )}
+        <div className="flex-1">
+          <p className="font-bold text-slate-900 text-base">{currentPlan} Plan</p>
+          <p className="text-sm text-slate-500">Your workspace is currently on the {currentPlan.toLowerCase()} plan</p>
+        </div>
+        <span className="px-3 py-1 text-xs font-semibold rounded-full text-white" style={{ background: PLAN_COLORS[currentPlan] ?? "#25D366" }}>
+          Active
+        </span>
+      </div>
 
-              {/* Header */}
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="font-bold text-slate-900">{plan.name}</p>
-                  {plan.description && <p className="text-xs text-slate-400 mt-0.5">{plan.description}</p>}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className={cn("w-2 h-2 rounded-full shrink-0", plan.isActive ? "bg-green-500" : "bg-slate-300")} />
-                  <span className="text-xs text-slate-400">{plan.isActive ? "Active" : "Hidden"}</span>
-                </div>
-              </div>
-
-              {/* Pricing */}
-              <div className="flex gap-4 text-sm">
-                <div>
-                  <p className="text-xs text-slate-400">Monthly</p>
-                  <p className="font-bold text-xl" style={{ color: "#25D366" }}>
-                    {plan.currency === "INR" ? "₹" : "$"}{plan.monthlyPrice}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400">Annual</p>
-                  <p className="font-bold text-xl text-slate-700">
-                    {plan.currency === "INR" ? "₹" : "$"}{plan.annualPrice}
-                  </p>
-                </div>
-              </div>
-
-              {/* Limits */}
-              <div className="grid grid-cols-2 gap-1 text-xs text-slate-600">
-                {[
-                  { label: "Users",      val: plan.maxUsers },
-                  { label: "Broadcasts", val: plan.maxBroadcasts >= 999999 ? "Unlimited" : plan.maxBroadcasts.toLocaleString() },
-                  { label: "Automations",val: plan.maxAutomations.toLocaleString() },
-                  { label: "API Calls",  val: plan.maxApiCalls >= 1000000 ? `${(plan.maxApiCalls/1000000).toFixed(0)}M` : plan.maxApiCalls.toLocaleString() },
-                  { label: "AI Credits", val: plan.maxAiCredits },
-                  { label: "WA Numbers", val: plan.maxWhatsappNumbers },
-                ].map((s) => (
-                  <div key={s.label} className="flex justify-between px-2 py-1 bg-slate-50 rounded">
-                    <span className="text-slate-400">{s.label}</span>
-                    <span className="font-medium text-slate-700">{s.val}</span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Features list */}
-              {Array.isArray(plan.features) && plan.features.length > 0 && (
-                <ul className="text-xs text-slate-600 space-y-1">
-                  {plan.features.slice(0, 4).map((f: string, i: number) => (
-                    <li key={i} className="flex items-center gap-1">
-                      <span className="text-green-500">✓</span> {f}
-                    </li>
-                  ))}
-                  {plan.features.length > 4 && (
-                    <li className="text-slate-400">+{plan.features.length - 4} more</li>
+      {/* Available plans */}
+      {plans.length > 0 && (
+        <div>
+          <p className="text-sm font-semibold text-slate-700 mb-3">Available Plans</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {plans.map((plan) => {
+              const isCurrent = plan.slug?.toUpperCase() === currentPlan || plan.name?.toUpperCase() === currentPlan;
+              return (
+                <div
+                  key={plan.id}
+                  className={cn(
+                    "bg-white rounded-xl border p-4 space-y-3",
+                    isCurrent ? "ring-2 ring-green-500" : ""
                   )}
-                </ul>
-              )}
-
-              {/* Actions */}
-              <div className="flex gap-2 mt-auto pt-2 border-t" style={{ borderColor: "#f1f5f9" }}>
-                <button
-                  onClick={() => toggleField(plan.id, "isActive", plan.isActive)}
-                  className="flex-1 py-1.5 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600 font-medium"
+                  style={{ borderColor: "#e2e8f0" }}
                 >
-                  {plan.isActive ? "Hide" : "Show"}
-                </button>
-                <button
-                  onClick={() => toggleField(plan.id, "isPopular", plan.isPopular)}
-                  className="flex-1 py-1.5 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600 font-medium"
-                >
-                  {plan.isPopular ? "Un-feature" : "Feature"}
-                </button>
-                <button
-                  onClick={() => openEdit(plan)}
-                  className="flex-1 py-1.5 text-xs rounded-lg font-medium text-white"
-                  style={{ background: "#25D366" }}
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() => handleDelete(plan.id, plan.name)}
-                  disabled={deleting === plan.id}
-                  className="px-2.5 py-1.5 text-xs rounded-lg font-medium bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-50"
-                >
-                  {deleting === plan.id ? "..." : "Del"}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Create / Edit Modal */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 overflow-auto">
-          <div className="bg-white rounded-2xl w-full max-w-2xl p-6 space-y-5 my-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-900">{editingId ? "Edit Plan" : "Create New Plan"}</h2>
-              <button onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">×</button>
-            </div>
-
-            <form onSubmit={handleSave} className="space-y-4">
-              {/* Basic info */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-600">Plan Name *</label>
-                  <input required value={form.name}
-                    onChange={(e) => setForm({ ...form, name: e.target.value, slug: e.target.value.toLowerCase().replace(/\s+/g, "-") })}
-                    placeholder="Growth"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-600">Slug</label>
-                  <input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })}
-                    placeholder="growth"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-600">Description</label>
-                <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="Best for growing businesses"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-              </div>
-
-              {/* Pricing */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-600">Monthly Price *</label>
-                  <input required type="number" min="0" step="0.01" value={form.monthlyPrice}
-                    onChange={(e) => setForm({ ...form, monthlyPrice: e.target.value })}
-                    placeholder="49"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-600">Annual Price</label>
-                  <input type="number" min="0" step="0.01" value={form.annualPrice}
-                    onChange={(e) => setForm({ ...form, annualPrice: e.target.value })}
-                    placeholder="470"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-600">Currency</label>
-                  <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none">
-                    <option value="USD">USD ($)</option>
-                    <option value="INR">INR (₹)</option>
-                    <option value="EUR">EUR (€)</option>
-                    <option value="GBP">GBP (£)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Limits */}
-              <div>
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Plan Limits</p>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { key: "maxUsers",           label: "Max Users" },
-                    { key: "maxBroadcasts",      label: "Max Broadcasts/mo" },
-                    { key: "maxAutomations",     label: "Max Automations" },
-                    { key: "maxApiCalls",        label: "Max API Calls" },
-                    { key: "maxAiCredits",       label: "AI Credits/mo" },
-                    { key: "maxWhatsappNumbers", label: "WA Numbers" },
-                  ].map((f) => (
-                    <div key={f.key} className="space-y-1">
-                      <label className="text-xs font-medium text-slate-600">{f.label}</label>
-                      <input type="number" min="0" value={(form as any)[f.key]}
-                        onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-bold text-slate-900">{plan.name}</p>
+                      {plan.description && <p className="text-xs text-slate-400 mt-0.5">{plan.description}</p>}
                     </div>
-                  ))}
+                    {isCurrent && (
+                      <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-green-100 text-green-700">Current</span>
+                    )}
+                  </div>
+                  <div className="flex gap-4 text-sm">
+                    <div>
+                      <p className="text-xs text-slate-400">Monthly</p>
+                      <p className="font-bold text-lg" style={{ color: "#25D366" }}>
+                        {plan.currency === "INR" ? "₹" : "$"}{plan.monthlyPrice}
+                      </p>
+                    </div>
+                    {plan.annualPrice > 0 && (
+                      <div>
+                        <p className="text-xs text-slate-400">Annual</p>
+                        <p className="font-bold text-lg text-slate-700">
+                          {plan.currency === "INR" ? "₹" : "$"}{plan.annualPrice}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-1 text-xs">
+                    {[
+                      { label: "Users", val: plan.maxUsers },
+                      { label: "Broadcasts", val: plan.maxBroadcasts >= 999999 ? "Unlimited" : plan.maxBroadcasts?.toLocaleString() },
+                      { label: "Automations", val: plan.maxAutomations?.toLocaleString() },
+                      { label: "WA Numbers", val: plan.maxWhatsappNumbers },
+                    ].map((s) => (
+                      <div key={s.label} className="flex justify-between px-2 py-1 bg-slate-50 rounded">
+                        <span className="text-slate-400">{s.label}</span>
+                        <span className="font-medium text-slate-700">{s.val}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-
-              {/* Features */}
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-600">Features (one per line)</label>
-                <textarea value={form.features}
-                  onChange={(e) => setForm({ ...form, features: e.target.value })}
-                  placeholder={"Unlimited broadcasts\n24x7 support\nHubSpot integration"}
-                  rows={4}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-500" />
-              </div>
-
-              {/* Toggles */}
-              <div className="flex gap-6">
-                {[
-                  { key: "isActive",  label: "Active (visible to users)" },
-                  { key: "isPopular", label: "Mark as Best Value" },
-                ].map((f) => (
-                  <label key={f.key} className="flex items-center gap-2 cursor-pointer">
-                    <button
-                      type="button"
-                      onClick={() => setForm({ ...form, [f.key]: !(form as any)[f.key] })}
-                      className={cn("relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors",
-                        (form as any)[f.key] ? "bg-green-500" : "bg-slate-200"
-                      )}
-                    >
-                      <span className={cn("inline-block w-4 h-4 transform rounded-full bg-white shadow transition-transform mt-0.5",
-                        (form as any)[f.key] ? "translate-x-4 ml-0.5" : "translate-x-0.5"
-                      )} />
-                    </button>
-                    <span className="text-sm text-slate-700">{f.label}</span>
-                  </label>
-                ))}
-              </div>
-
-              {/* Sort order */}
-              <div className="space-y-1 w-32">
-                <label className="text-xs font-medium text-slate-600">Sort Order</label>
-                <input type="number" min="0" value={form.sortOrder}
-                  onChange={(e) => setForm({ ...form, sortOrder: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-              </div>
-
-              <div className="flex gap-2 pt-2 border-t" style={{ borderColor: "#e2e8f0" }}>
-                <button type="button" onClick={() => setShowForm(false)}
-                  className="flex-1 py-2.5 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
-                  Cancel
-                </button>
-                <button type="submit" disabled={saving}
-                  className="flex-1 py-2.5 text-sm font-semibold text-white rounded-lg disabled:opacity-60"
-                  style={{ background: "#25D366" }}>
-                  {saving ? "Saving..." : editingId ? "Update Plan" : "Create Plan"}
-                </button>
-              </div>
-            </form>
+              );
+            })}
           </div>
         </div>
       )}
+
+      {/* Upgrade CTA */}
+      <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800">
+        <p className="font-semibold">Want to upgrade or change your plan?</p>
+        <p className="mt-1 text-green-700">Contact your account manager or reach out to support to upgrade your subscription.</p>
+      </div>
     </div>
   );
 }
