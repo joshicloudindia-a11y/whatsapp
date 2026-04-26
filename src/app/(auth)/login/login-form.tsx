@@ -42,9 +42,19 @@ export default function LoginForm() {
           </p>
         )}
         {params.get("error") && (
-          <p className="text-red-600 text-sm bg-red-50 px-3 py-2 rounded-lg">
-            {params.get("error") === "expired" ? "Verification link expired." : "Invalid link."}
-          </p>
+          <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-100 space-y-1">
+            <p className="text-red-600 text-sm">
+              {params.get("error") === "expired" ? "Verification link expired." : "Invalid link."}
+            </p>
+            {params.get("error") === "expired" && (
+              <p className="text-red-500 text-xs">
+                You can still log in — your account is active.{" "}
+                <Link href="/forgot-password" className="underline font-medium">
+                  Need help?
+                </Link>
+              </p>
+            )}
+          </div>
         )}
       </div>
 
