@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { cn, timeAgo, getInitials } from "@/lib/utils";
@@ -10,9 +11,16 @@ import { toast } from "sonner";
 type Tab = "profile" | "organization" | "team" | "api-keys" | "billing";
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<Tab>("profile");
+  const searchParams = useSearchParams();
+  const initialTab = (searchParams.get("tab") as Tab | null) ?? "profile";
+  const [tab, setTab] = useState<Tab>(initialTab);
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === "ADMIN";
+
+  useEffect(() => {
+    const t = searchParams.get("tab") as Tab | null;
+    if (t) setTab(t);
+  }, [searchParams]);
 
   const tabs: { id: Tab; label: string; adminOnly?: boolean }[] = [
     { id: "profile",      label: "My Profile" },

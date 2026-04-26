@@ -441,7 +441,7 @@ function HowItWorks() {
 }
 
 // ─── Pricing ──────────────────────────────────────────────────────────────────
-function Pricing() {
+function Pricing({ isLoggedIn }: { isLoggedIn: boolean }) {
   const [annual, setAnnual] = useState(false);
 
   const { data, isLoading } = useQuery({
@@ -556,13 +556,17 @@ function Pricing() {
                     )}
 
                     <Link
-                      href="/register"
+                      href={isLoggedIn ? "/settings?tab=billing" : "/register"}
                       className={cn("mt-auto block text-center py-3 rounded-xl text-sm font-bold transition-all",
                         plan.isPopular ? "text-white hover:brightness-110" : "border-2 text-slate-700 hover:bg-slate-50"
                       )}
                       style={plan.isPopular ? { background: "#25D366" } : { borderColor: "#e2e8f0" }}
                     >
-                      {price === 0 ? "Get Started Free" : "Start Free Trial"}
+                      {isLoggedIn
+                        ? "Select Plan"
+                        : price === 0
+                          ? "Get Started Free"
+                          : "Start Free Trial"}
                     </Link>
                   </div>
                 </div>
@@ -750,7 +754,7 @@ export default function LandingPage({
       <HowItWorks />
       <Testimonials />
       <TrustBadges />
-      <Pricing />
+      <Pricing isLoggedIn={isLoggedIn} />
       <CTA isLoggedIn={isLoggedIn} dashHref={dashHref} />
       <Footer />
       <MobileBottomNav isLoggedIn={isLoggedIn} dashHref={dashHref} />

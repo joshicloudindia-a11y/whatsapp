@@ -11,9 +11,132 @@ import {
 } from "recharts";
 import { timeAgo, getInitials, cn } from "@/lib/utils";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faBullhorn, faComments, faUserPlus, faFileAlt } from "@fortawesome/free-solid-svg-icons";
+import { faBullhorn, faComments, faUserPlus, faFileAlt, faRocket, faCrown, faXmark, faCheck } from "@fortawesome/free-solid-svg-icons";
 
 type Range = "7d" | "30d" | "90d";
+
+type Plan = {
+  id: string; name: string; slug: string; description?: string;
+  monthlyPrice: number; annualPrice: number; currency: string;
+  isPopular: boolean; features: string[];
+  maxUsers: number; maxBroadcasts: number; maxAutomations: number;
+  maxApiCalls: number; maxAiCredits: number; maxWhatsappNumbers: number;
+};
+
+const CURRENCY_SYMBOL: Record<string, string> = { USD: "$", INR: "₹", EUR: "€", GBP: "£" };
+
+// ─── Trial / Plan banner ───────────────────────────────────────────────────────
+function PlanBanner() {
+  const [dismissed, setDismissed] = useState(false);
+
+  const { data: sub } = useQuery({
+    queryKey: ["my-subscription"],
+    queryFn: () => axios.get("/api/settings/subscription").then((r) => r.data),
+  });
+
+  const { data: plansData } = useQuery({
+    queryKey: ["public-plans"],
+    queryFn: () => axios.get("/api/plans").then((r) => r.data),
+    enabled: !!sub,
+  });
+
+  if (dismissed || !sub) return null;
+
+  const isTrial = sub.status === "TRIAL" || sub.plan === "TRIAL";
+  if (!isTrial) return null;
+
+  const trialEndsAt = sub.trialEndsAt ? new Date(sub.trialEndsAt) : null;
+  const daysLeft = trialEndsAt
+    ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / 86400000))
+    : null;
+
+  const plans: Plan[] = plansData?.plans ?? [];
+
+  return (
+    <div className="rounded-2xl border-2 overflow-hidden" style={{ borderColor: "#25D366" }}>
+      {/* Banner header */}
+      <div className="flex items-center justify-between px-5 py-3.5" style={{ background: "#25D366" }}>
+        <div className="flex items-center gap-2.5 text-white">
+          <FontAwesomeIcon icon={faRocket} className="w-4 h-4" />
+          <span className="text-sm font-bold">
+            {daysLeft !== null
+              ? `Your free trial ends in ${daysLeft} day${daysLeft !== 1 ? "s" : ""} — Upgrade to keep access`
+              : "You're on a free trial — Upgrade to unlock all features"}
+          </span>
+        </div>
+        <button onClick={() => setDismissed(true)} className="text-white/70 hover:text-white transition-colors">
+          <FontAwesomeIcon icon={faXmark} className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Plans */}
+      {plans.length > 0 && (
+        <div className="bg-white p-5">
+          <div className={cn(
+            "grid gap-4",
+            plans.length === 1 ? "grid-cols-1 max-w-xs" :
+            plans.length === 2 ? "grid-cols-1 sm:grid-cols-2" :
+            "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+          )}>
+            {plans.map((plan) => {
+              const sym = CURRENCY_SYMBOL[plan.currency] ?? "$";
+              return (
+                <div
+                  key={plan.id}
+                  className={cn(
+                    "relative rounded-xl border p-4 flex flex-col gap-3",
+                    plan.isPopular ? "border-2" : "border"
+                  )}
+                  style={{ borderColor: plan.isPopular ? "#25D366" : "#e2e8f0" }}
+                >
+                  {plan.isPopular && (
+                    <span className="absolute -top-2.5 left-4 px-2.5 py-0.5 text-xs font-bold text-white rounded-full"
+                      style={{ background: "#25D366" }}>
+                      <FontAwesomeIcon icon={faCrown} className="w-3 h-3 mr-1" />
+                      Most Popular
+                    </span>
+                  )}
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">{plan.name}</h3>
+                    {plan.description && (
+                      <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{plan.description}</p>
+                    )}
+                  </div>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-2xl font-extrabold text-slate-900">{sym}{plan.monthlyPrice}</span>
+                    <span className="text-xs text-slate-400">/ month</span>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {plan.features.slice(0, 4).map((f, i) => (
+                      <li key={i} className="flex items-start gap-1.5 text-xs text-slate-600">
+                        <FontAwesomeIcon icon={faCheck} className="w-3 h-3 mt-0.5 shrink-0" style={{ color: "#25D366" }} />
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                  <Link
+                    href="/settings?tab=billing"
+                    className={cn(
+                      "mt-auto block text-center py-2 rounded-lg text-xs font-bold transition-all",
+                      plan.isPopular ? "text-white hover:brightness-110" : "border text-slate-700 hover:bg-slate-50"
+                    )}
+                    style={plan.isPopular ? { background: "#25D366" } : { borderColor: "#e2e8f0" }}
+                  >
+                    Select Plan
+                  </Link>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-xs text-slate-400 mt-4 text-center">
+            Questions? <a href="mailto:support@chatflow.ai" className="underline hover:text-slate-600">Contact us</a> or visit{" "}
+            <Link href="/settings?tab=billing" className="underline hover:text-slate-600">Settings → Billing</Link>
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Trend badge ──────────────────────────────────────────────────────────────
 function Trend({ pct }: { pct: number }) {
@@ -119,6 +242,9 @@ export default function DashboardPage() {
           ))}
         </div>
       </div>
+
+      {/* ── Plan / Trial Banner ── */}
+      <PlanBanner />
 
       {/* ── Quick Actions ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
