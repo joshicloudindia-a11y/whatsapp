@@ -5,8 +5,9 @@ import { prisma } from "@/lib/prisma";
 
 async function requireSuperAdmin() {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.isSuperAdmin) return null;
-  return session;
+  if (!session) return null;
+  const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { isSuperAdmin: true } });
+  return user?.isSuperAdmin ? session : null;
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

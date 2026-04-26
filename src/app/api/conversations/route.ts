@@ -12,8 +12,8 @@ export async function GET(req: NextRequest) {
   const assignedTo = searchParams.get("assignedTo");
   const labelId = searchParams.get("labelId");
   const search = searchParams.get("search");
-  const page = parseInt(searchParams.get("page") ?? "1");
-  const limit = parseInt(searchParams.get("limit") ?? "30");
+  const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
+  const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "30")));
 
   const where: any = {
     organizationId: session.user.organizationId,

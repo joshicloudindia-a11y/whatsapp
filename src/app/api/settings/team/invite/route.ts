@@ -8,6 +8,7 @@ import { generateToken } from "@/lib/utils";
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (session.user.role !== "ADMIN") return NextResponse.json({ error: "Admin only" }, { status: 403 });
 
   const { email, role } = await req.json();
 

@@ -12,8 +12,8 @@ export async function GET(req: NextRequest) {
   const search = searchParams.get("search");
   const stage = searchParams.get("stage");
   const tag = searchParams.get("tag");
-  const page = parseInt(searchParams.get("page") ?? "1");
-  const limit = parseInt(searchParams.get("limit") ?? "50");
+  const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
+  const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") ?? "50")));
 
   const where: any = { organizationId: session.user.organizationId };
 

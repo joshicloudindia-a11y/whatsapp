@@ -3,10 +3,16 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function requireSuperAdmin() {
   const session = await getServerSession(authOptions);
-  if (!session || session.user.role !== "ADMIN")
-    return NextResponse.json({ error: "Admin only" }, { status: 403 });
+  if (!session) return null;
+  const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { isSuperAdmin: true } });
+  return user?.isSuperAdmin ? session : null;
+}
+
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await requireSuperAdmin();
+  if (!session) return NextResponse.json({ error: "Super admin only" }, { status: 403 });
 
   const { id } = await params;
   const body = await req.json();
@@ -24,10 +30,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getServerSession(authOptions);
-  if (!session || session.user.role !== "ADMIN")
-    return NextResponse.json({ error: "Admin only" }, { status: 403 });
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await requireSuperAdmin();
+  if (!session) return NextResponse.json({ error: "Super admin only" }, { status: 403 });
 
   const { id } = await params;
   try {

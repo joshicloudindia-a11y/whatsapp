@@ -10,7 +10,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  const page = parseInt(req.nextUrl.searchParams.get("page") ?? "1");
+  const page = Math.max(1, parseInt(req.nextUrl.searchParams.get("page") ?? "1"));
   const limit = 50;
 
   const messages = await prisma.message.findMany({

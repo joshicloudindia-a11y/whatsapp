@@ -5,8 +5,9 @@ import { prisma } from "@/lib/prisma";
 
 async function requireSuperAdmin() {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.isSuperAdmin) return null;
-  return session;
+  if (!session) return null;
+  const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { isSuperAdmin: true } });
+  return user?.isSuperAdmin ? session : null;
 }
 
 export async function GET(req: NextRequest) {
@@ -15,8 +16,8 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = req.nextUrl;
   const search = searchParams.get("search") ?? "";
-  const page = parseInt(searchParams.get("page") ?? "1");
-  const limit = parseInt(searchParams.get("limit") ?? "20");
+  const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
+  const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "20")));
 
   const where: any = {};
   if (search) {

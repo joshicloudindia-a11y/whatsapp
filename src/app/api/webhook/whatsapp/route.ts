@@ -57,13 +57,21 @@ export async function POST(req: NextRequest) {
 
       if (messages?.length) {
         for (const msg of messages) {
-          await handleInboundMessage(msg, waAccount, contacts);
+          try {
+            await handleInboundMessage(msg, waAccount, contacts);
+          } catch (err) {
+            console.error("Failed to handle message:", msg.id, err);
+          }
         }
       }
 
       if (statuses?.length) {
         for (const status of statuses) {
-          await handleStatusUpdate(status, waAccount.organizationId);
+          try {
+            await handleStatusUpdate(status, waAccount.organizationId);
+          } catch (err) {
+            console.error("Failed to handle status update:", status.id, err);
+          }
         }
       }
     }

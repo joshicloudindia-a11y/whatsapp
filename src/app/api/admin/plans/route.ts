@@ -3,8 +3,12 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-function adminOnly(role: string) {
-  return role !== "ADMIN";
+async function requireSuperAdmin() {
+  const session = await getServerSession(authOptions);
+  if (!session) return null;
+  // Always verify from DB — JWT may be stale
+  const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { isSuperAdmin: true } });
+  return user?.isSuperAdmin ? session : null;
 }
 
 export async function GET() {
@@ -19,9 +23,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session || adminOnly(session.user.role))
-    return NextResponse.json({ error: "Admin only" }, { status: 403 });
+  const session = await requireSuperAdmin();
+  if (!session) return NextResponse.json({ error: "Super admin only" }, { status: 403 });
 
   const body = await req.json();
   const {
