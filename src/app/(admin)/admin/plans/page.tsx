@@ -12,6 +12,7 @@ const EMPTY_PLAN = {
   currency: "USD", isActive: true, isPopular: false, sortOrder: 0,
   maxUsers: 3, maxBroadcasts: 5000, maxAutomations: 100, maxApiCalls: 10000,
   maxAiCredits: 100, maxWhatsappNumbers: 1, features: "[]",
+  stripePriceMonthly: "", stripePriceAnnual: "",
 };
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -246,6 +247,19 @@ export default function AdminPlansPage() {
                   <Field label="API Calls"><input {...num("maxApiCalls")} min={0} /></Field>
                   <Field label="AI Credits"><input {...num("maxAiCredits")} min={0} /></Field>
                   <Field label="WA Numbers"><input {...num("maxWhatsappNumbers")} min={1} /></Field>
+                </div>
+
+                <div className="rounded-xl border border-dashed border-slate-300 p-3 space-y-3 bg-slate-50">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Stripe Price IDs</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Field label="Monthly Price ID">
+                      <input {...txt("stripePriceMonthly")} placeholder="price_xxx" />
+                    </Field>
+                    <Field label="Annual Price ID">
+                      <input {...txt("stripePriceAnnual")} placeholder="price_xxx" />
+                    </Field>
+                  </div>
+                  <p className="text-[10px] text-slate-400">Copy Price IDs from your Stripe Dashboard → Products</p>
                 </div>
 
                 <Field label="Features (JSON array)">

@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
 const PUBLIC_PATHS = ["/", "/login", "/register", "/forgot-password", "/reset-password", "/verify-email"];
-const PUBLIC_API  = ["/api/auth", "/api/webhook", "/api/plans"];
+const PUBLIC_API  = ["/api/auth", "/api/webhook", "/api/plans", "/api/billing/webhook"];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
