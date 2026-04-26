@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-import { sendMail, verificationEmailHtml } from "@/lib/mailer";
-import { generateToken, slugify } from "@/lib/utils";
+import { sendMail, otpEmailHtml } from "@/lib/mailer";
+import { slugify, generateToken } from "@/lib/utils";
 import { z } from "zod";
 
 const schema = z.object({
@@ -11,6 +11,10 @@ const schema = z.object({
   password: z.string().min(8),
   orgName: z.string().min(2),
 });
+
+function generateOtp() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,17 +28,17 @@ export async function POST(req: NextRequest) {
 
     const passwordHash = await bcrypt.hash(password, 12);
     const slug = slugify(orgName) + "-" + generateToken(4).toLowerCase();
-    const verifyToken = generateToken(48);
+    const otp = generateOtp();
 
-    const user = await prisma.user.create({
+    await prisma.user.create({
       data: {
         name,
         email: email.toLowerCase(),
         passwordHash,
         verificationTokens: {
           create: {
-            token: verifyToken,
-            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+            token: otp,
+            expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
           },
         },
         memberships: {
@@ -60,14 +64,13 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    const verifyUrl = `${process.env.NEXT_PUBLIC_APP_URL}/verify-email?token=${verifyToken}`;
     await sendMail({
       to: email,
-      subject: "Verify your ChatFlow email",
-      html: verificationEmailHtml(name, verifyUrl),
+      subject: "Your ChatFlow verification code",
+      html: otpEmailHtml(name, otp),
     });
 
-    return NextResponse.json({ success: true, message: "Account created. Check your email to verify." });
+    return NextResponse.json({ success: true });
   } catch (error: any) {
     if (error.name === "ZodError") {
       return NextResponse.json({ error: "Invalid input", details: error.errors }, { status: 422 });
