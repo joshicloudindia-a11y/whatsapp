@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { toast } from "sonner";
@@ -15,45 +15,35 @@ type Plan = {
   id: string; name: string; slug: string; description?: string;
   monthlyPrice: number; annualPrice: number; currency: string;
   isPopular: boolean; features: string[];
-  stripePriceMonthly?: string | null; stripePriceAnnual?: string | null;
-  razorpayPlanMonthly?: string | null; razorpayPlanAnnual?: string | null;
 };
+
+type Gateways = { stripe: boolean; razorpay: boolean };
 
 const CURRENCY_SYMBOL: Record<string, string> = { USD: "$", INR: "₹", EUR: "€", GBP: "£" };
 
-// ─── Load Razorpay script ─────────────────────────────────────────────────────
 function loadRazorpayScript(): Promise<boolean> {
   return new Promise((resolve) => {
     if ((window as any).Razorpay) { resolve(true); return; }
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
+    const s = document.createElement("script");
+    s.src = "https://checkout.razorpay.com/v1/checkout.js";
+    s.onload = () => resolve(true);
+    s.onerror = () => resolve(false);
+    document.body.appendChild(s);
   });
 }
 
-// ─── Plan card ────────────────────────────────────────────────────────────────
+// ─── Individual plan card ─────────────────────────────────────────────────────
 function PlanCard({
-  plan,
-  annual,
-  isAdmin,
-  onStripe,
-  onRazorpay,
-  loadingKey,
+  plan, annual, isAdmin, gateways, loadingKey, onStripe, onRazorpay,
 }: {
-  plan: Plan;
-  annual: boolean;
-  isAdmin: boolean;
-  onStripe: (plan: Plan) => void;
-  onRazorpay: (plan: Plan) => void;
+  plan: Plan; annual: boolean; isAdmin: boolean; gateways: Gateways;
   loadingKey: string | null;
+  onStripe: (p: Plan) => void;
+  onRazorpay: (p: Plan) => void;
 }) {
   const price = annual ? plan.annualPrice : plan.monthlyPrice;
   const sym = CURRENCY_SYMBOL[plan.currency] ?? "$";
-  const hasStripe = annual ? !!plan.stripePriceAnnual : !!plan.stripePriceMonthly;
-  const hasRazorpay = !!(plan.razorpayPlanMonthly || plan.razorpayPlanAnnual);
-  const hasAnyGateway = hasStripe || hasRazorpay;
+  const hasAny = gateways.stripe || gateways.razorpay;
 
   return (
     <div
@@ -97,84 +87,87 @@ function PlanCard({
           ))}
         </ul>
 
-        {/* CTA buttons */}
-        {isAdmin ? (
-          <div className="mt-auto space-y-2">
-            {hasStripe && (
-              <button
-                onClick={() => onStripe(plan)}
-                disabled={!!loadingKey}
-                className={cn(
-                  "w-full py-2.5 rounded-xl text-sm font-bold transition-all disabled:opacity-60 flex items-center justify-center gap-2",
-                  plan.isPopular ? "text-white hover:brightness-110" : "border-2 text-slate-700 hover:bg-slate-50"
+        <div className="mt-auto space-y-2">
+          {isAdmin ? (
+            hasAny ? (
+              <>
+                {gateways.stripe && (
+                  <button
+                    onClick={() => onStripe(plan)}
+                    disabled={!!loadingKey}
+                    className={cn(
+                      "w-full py-2.5 rounded-xl text-sm font-bold transition-all disabled:opacity-60 flex items-center justify-center gap-2",
+                      plan.isPopular ? "text-white hover:brightness-110" : "border-2 text-slate-700 hover:bg-slate-50"
+                    )}
+                    style={plan.isPopular ? { background: "#25D366" } : { borderColor: "#e2e8f0" }}
+                  >
+                    {loadingKey === `stripe-${plan.slug}` ? (
+                      <><span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Redirecting…</>
+                    ) : (
+                      <><FontAwesomeIcon icon={faCreditCard} className="w-3.5 h-3.5" />Pay with Stripe</>
+                    )}
+                  </button>
                 )}
-                style={plan.isPopular ? { background: "#25D366" } : { borderColor: "#e2e8f0" }}
-              >
-                {loadingKey === `stripe-${plan.slug}` ? (
-                  <><span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> Redirecting…</>
-                ) : (
-                  <><FontAwesomeIcon icon={faCreditCard} className="w-3.5 h-3.5" /> Pay with Stripe</>
-                )}
-              </button>
-            )}
 
-            {hasRazorpay && (
-              <button
-                onClick={() => onRazorpay(plan)}
-                disabled={!!loadingKey}
-                className="w-full py-2.5 rounded-xl text-sm font-bold border-2 transition-all disabled:opacity-60 flex items-center justify-center gap-2 hover:opacity-90"
-                style={{ borderColor: "#2d6ae0", color: "#2d6ae0", background: loadingKey === `rzp-${plan.slug}` ? "#eff6ff" : "white" }}
-              >
-                {loadingKey === `rzp-${plan.slug}` ? (
-                  <><span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> Opening…</>
-                ) : (
-                  <>
-                    <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current">
-                      <path d="M0 0l4.5 15.9L10.1 9H6.7L9.9 0H0zm24 0H14.1L9.9 9h3.4l-5.6 15.9L24 0z" />
-                    </svg>
-                    Pay with Razorpay
-                  </>
+                {gateways.razorpay && (
+                  <button
+                    onClick={() => onRazorpay(plan)}
+                    disabled={!!loadingKey}
+                    className="w-full py-2.5 rounded-xl text-sm font-bold border-2 transition-all disabled:opacity-60 flex items-center justify-center gap-2 hover:opacity-90"
+                    style={{ borderColor: "#2d6ae0", color: "#2d6ae0" }}
+                  >
+                    {loadingKey === `rzp-${plan.slug}` ? (
+                      <><span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Opening…</>
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current">
+                          <path d="M0 0l4.5 15.9L10.1 9H6.7L9.9 0H0zm24 0H14.1L9.9 9h3.4l-5.6 15.9L24 0z" />
+                        </svg>
+                        Pay with Razorpay
+                      </>
+                    )}
+                  </button>
                 )}
-              </button>
-            )}
-
-            {!hasAnyGateway && (
+              </>
+            ) : (
               <div className="w-full py-2.5 rounded-xl text-xs font-medium text-center text-slate-500 bg-slate-50 border border-slate-100">
-                Contact us to purchase this plan
+                Payment not configured yet
               </div>
-            )}
-          </div>
-        ) : (
-          <div className="mt-auto w-full py-2.5 rounded-xl text-xs font-medium text-center text-slate-500 bg-slate-50 border border-slate-100">
-            Ask your admin to select this plan
-          </div>
-        )}
+            )
+          ) : (
+            <div className="w-full py-2.5 rounded-xl text-xs font-medium text-center text-slate-500 bg-slate-50 border border-slate-100">
+              Ask your admin to select this plan
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────────────────────
 export default function UpgradeRequired({
-  orgName,
-  userName,
-  isAdmin,
+  orgName, userName, isAdmin,
 }: {
-  orgName: string;
-  userName: string;
-  isAdmin: boolean;
+  orgName: string; userName: string; isAdmin: boolean;
 }) {
   const [annual, setAnnual] = useState(false);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data: plansData, isLoading: plansLoading } = useQuery({
     queryKey: ["public-plans"],
     queryFn: () => axios.get("/api/plans").then((r) => r.data),
   });
 
-  const plans: Plan[] = data?.plans ?? [];
+  const { data: gatewayData } = useQuery({
+    queryKey: ["billing-gateways"],
+    queryFn: () => axios.get("/api/billing/gateways").then((r) => r.data),
+  });
 
-  // ── Stripe checkout ──
+  const plans: Plan[] = plansData?.plans ?? [];
+  const gateways: Gateways = gatewayData ?? { stripe: false, razorpay: false };
+
+  // ── Stripe ──
   const handleStripe = async (plan: Plan) => {
     setLoadingKey(`stripe-${plan.slug}`);
     try {
@@ -189,27 +182,31 @@ export default function UpgradeRequired({
     }
   };
 
-  // ── Razorpay checkout ──
+  // ── Razorpay ──
   const handleRazorpay = async (plan: Plan) => {
     setLoadingKey(`rzp-${plan.slug}`);
     try {
       const loaded = await loadRazorpayScript();
-      if (!loaded) { toast.error("Failed to load Razorpay. Check your connection."); setLoadingKey(null); return; }
+      if (!loaded) {
+        toast.error("Could not load Razorpay. Check your internet connection.");
+        setLoadingKey(null);
+        return;
+      }
 
       const res = await axios.post("/api/billing/razorpay/order", {
         planSlug: plan.slug,
         interval: annual ? "annual" : "monthly",
       });
-      const { orderId, amount, currency, keyId, orgName: oName, planName } = res.data;
+      const { orderId, amount, currency, keyId, planName } = res.data;
 
-      const options = {
+      const rzp = new (window as any).Razorpay({
         key: keyId,
         amount,
         currency,
         name: "ChatFlow",
         description: `${planName} — ${annual ? "Annual" : "Monthly"} Plan`,
         order_id: orderId,
-        prefill: { name: userName, email: "" },
+        prefill: { name: userName },
         theme: { color: "#25D366" },
         handler: async (response: any) => {
           try {
@@ -227,26 +224,23 @@ export default function UpgradeRequired({
             setLoadingKey(null);
           }
         },
-        modal: {
-          ondismiss: () => setLoadingKey(null),
-        },
-      };
+        modal: { ondismiss: () => setLoadingKey(null) },
+      });
 
-      const rzp = new (window as any).Razorpay(options);
       rzp.on("payment.failed", (resp: any) => {
         toast.error(resp.error?.description ?? "Payment failed. Please try again.");
         setLoadingKey(null);
       });
       rzp.open();
     } catch (e: any) {
-      toast.error(e.response?.data?.error ?? "Failed to initiate Razorpay checkout");
+      toast.error(e.response?.data?.error ?? "Failed to initiate payment");
       setLoadingKey(null);
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Top bar */}
+      {/* Header */}
       <header className="bg-white border-b border-slate-100 px-4 sm:px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: "#25D366" }}>
@@ -257,13 +251,13 @@ export default function UpgradeRequired({
           <span className="font-bold text-slate-900 text-sm">ChatFlow</span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-slate-400 hidden sm:block truncate max-w-[180px]">{userName} · {orgName}</span>
+          <span className="text-xs text-slate-400 hidden sm:block truncate max-w-[200px]">{userName} · {orgName}</span>
           <button
             onClick={() => signOut({ callbackUrl: "/login" })}
             className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors"
           >
             <FontAwesomeIcon icon={faArrowRightFromBracket} className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline text-sm">Sign out</span>
+            <span className="hidden sm:inline">Sign out</span>
           </button>
         </div>
       </header>
@@ -272,7 +266,6 @@ export default function UpgradeRequired({
       <div className="flex-1 overflow-y-auto py-10 px-4">
         <div className="max-w-5xl mx-auto space-y-8">
 
-          {/* Hero */}
           <div className="text-center space-y-3">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
               <FontAwesomeIcon icon={faLock} className="w-3 h-3" />
@@ -288,7 +281,7 @@ export default function UpgradeRequired({
             </p>
           </div>
 
-          {/* Toggle */}
+          {/* Monthly / Annual toggle */}
           {isAdmin && (
             <div className="flex items-center justify-center gap-4">
               <span className={cn("text-sm font-medium", !annual ? "text-slate-900" : "text-slate-400")}>Monthly</span>
@@ -311,8 +304,8 @@ export default function UpgradeRequired({
             </div>
           )}
 
-          {/* Plans */}
-          {isLoading ? (
+          {/* Plan cards */}
+          {plansLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               {[1, 2, 3].map((i) => (
                 <div key={i} className="bg-white rounded-2xl border border-slate-100 p-7 animate-pulse h-80" />
@@ -336,16 +329,17 @@ export default function UpgradeRequired({
                   plan={plan}
                   annual={annual}
                   isAdmin={isAdmin}
+                  gateways={gateways}
+                  loadingKey={loadingKey}
                   onStripe={handleStripe}
                   onRazorpay={handleRazorpay}
-                  loadingKey={loadingKey}
                 />
               ))}
             </div>
           )}
 
           <p className="text-center text-xs text-slate-400 pb-6">
-            Secure payments via Stripe & Razorpay · Cancel anytime · Need help? Contact support
+            Secure payments via Stripe &amp; Razorpay · Cancel anytime · Need help? Contact support
           </p>
         </div>
       </div>

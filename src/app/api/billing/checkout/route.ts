@@ -22,12 +22,9 @@ export async function POST(req: NextRequest) {
   const plan = await prisma.planConfig.findUnique({ where: { slug: body.planSlug } });
   if (!plan) return NextResponse.json({ error: "Plan not found" }, { status: 404 });
 
-  const priceId = body.interval === "annual" ? plan.stripePriceAnnual : plan.stripePriceMonthly;
-  if (!priceId) {
-    return NextResponse.json(
-      { error: "This plan is not configured for online payment. Please contact us." },
-      { status: 400 }
-    );
+  const price = body.interval === "annual" ? plan.annualPrice : plan.monthlyPrice;
+  if (!price || price <= 0) {
+    return NextResponse.json({ error: "Invalid plan price" }, { status: 400 });
   }
 
   const stripe = getStripe();
@@ -58,10 +55,26 @@ export async function POST(req: NextRequest) {
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
+  // Use price_data — no pre-created Price IDs needed in Stripe Dashboard
   const checkoutSession = await stripe.checkout.sessions.create({
     customer: customerId,
     mode: "subscription",
-    line_items: [{ price: priceId, quantity: 1 }],
+    line_items: [
+      {
+        price_data: {
+          currency: plan.currency.toLowerCase(),
+          product_data: {
+            name: plan.name,
+            description: plan.description ?? undefined,
+          },
+          unit_amount: Math.round(price * 100),
+          recurring: {
+            interval: body.interval === "annual" ? "year" : "month",
+          },
+        },
+        quantity: 1,
+      },
+    ],
     success_url: `${appUrl}/dashboard?payment=success`,
     cancel_url: `${appUrl}/dashboard`,
     metadata: { organizationId: orgId, planSlug: body.planSlug },
