@@ -764,8 +764,10 @@ model PlanConfig {
   maxAiCredits       Int      @default(50)
   maxWhatsappNumbers Int      @default(1)
   features           Json     @default("[]")
-  stripePriceMonthly String?
-  stripePriceAnnual  String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  stripePriceMonthly   String?
+  stripePriceAnnual    String?
+  razorpayPlanMonthly  String?
+  razorpayPlanAnnual   String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 }

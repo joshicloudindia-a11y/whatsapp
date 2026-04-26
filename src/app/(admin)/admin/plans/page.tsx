@@ -13,6 +13,7 @@ const EMPTY_PLAN = {
   maxUsers: 3, maxBroadcasts: 5000, maxAutomations: 100, maxApiCalls: 10000,
   maxAiCredits: 100, maxWhatsappNumbers: 1, features: "[]",
   stripePriceMonthly: "", stripePriceAnnual: "",
+  razorpayPlanMonthly: "", razorpayPlanAnnual: "",
 };
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -249,6 +250,7 @@ export default function AdminPlansPage() {
                   <Field label="WA Numbers"><input {...num("maxWhatsappNumbers")} min={1} /></Field>
                 </div>
 
+                {/* Stripe */}
                 <div className="rounded-xl border border-dashed border-slate-300 p-3 space-y-3 bg-slate-50">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Stripe Price IDs</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -259,7 +261,21 @@ export default function AdminPlansPage() {
                       <input {...txt("stripePriceAnnual")} placeholder="price_xxx" />
                     </Field>
                   </div>
-                  <p className="text-[10px] text-slate-400">Copy Price IDs from your Stripe Dashboard → Products</p>
+                  <p className="text-[10px] text-slate-400">Stripe Dashboard → Products → Copy Price ID</p>
+                </div>
+
+                {/* Razorpay */}
+                <div className="rounded-xl border border-dashed border-blue-200 p-3 space-y-3 bg-blue-50">
+                  <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide">Razorpay Plan IDs</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Field label="Monthly Plan ID">
+                      <input {...txt("razorpayPlanMonthly")} placeholder="plan_xxx (optional)" />
+                    </Field>
+                    <Field label="Annual Plan ID">
+                      <input {...txt("razorpayPlanAnnual")} placeholder="plan_xxx (optional)" />
+                    </Field>
+                  </div>
+                  <p className="text-[10px] text-blue-400">Razorpay Dashboard → Subscriptions → Plans → Copy Plan ID. Leave blank to use order-based payment.</p>
                 </div>
 
                 <Field label="Features (JSON array)">
