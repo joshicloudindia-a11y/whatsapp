@@ -1,5 +1,6 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 
@@ -12,7 +13,15 @@ const NAV = [
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
-  if (!session || !session.user.isSuperAdmin) redirect("/dashboard");
+  if (!session) redirect("/login");
+
+  // JWT might be stale (logged in before isSuperAdmin was added) — always verify from DB
+  const dbUser = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { isSuperAdmin: true },
+  });
+
+  if (!dbUser?.isSuperAdmin) redirect("/dashboard");
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: "#0f172a" }}>
