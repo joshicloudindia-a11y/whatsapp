@@ -42,6 +42,7 @@ export const authOptions: NextAuthOptions = {
           email: user.email,
           name: user.name,
           image: user.avatar,
+          isSuperAdmin: user.isSuperAdmin,
           organizationId: membership?.organizationId ?? null,
           organizationSlug: membership?.organization?.slug ?? null,
           role: membership?.role ?? null,
@@ -54,6 +55,7 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.id = user.id;
         token.name = user.name;
+        token.isSuperAdmin = (user as any).isSuperAdmin;
         token.organizationId = (user as any).organizationId;
         token.organizationSlug = (user as any).organizationSlug;
         token.role = (user as any).role;
@@ -67,6 +69,7 @@ export const authOptions: NextAuthOptions = {
       if (token && session.user) {
         session.user.id = token.id as string;
         session.user.name = token.name as string;
+        session.user.isSuperAdmin = token.isSuperAdmin as boolean;
         session.user.organizationId = token.organizationId as string;
         session.user.organizationSlug = token.organizationSlug as string;
         session.user.role = token.role as string;

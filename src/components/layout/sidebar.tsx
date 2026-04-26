@@ -117,6 +117,19 @@ export function Sidebar() {
         ))}
       </nav>
 
+      {/* Super Admin Link */}
+      {(session?.user as any)?.isSuperAdmin && (
+        <div className="px-3 pb-2">
+          <Link
+            href="/admin"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-white"
+            style={{ background: "#0f172a" }}
+          >
+            <span>⚡</span> Super Admin Panel
+          </Link>
+        </div>
+      )}
+
       {/* User */}
       <div className="border-t p-3" style={{ borderColor: "#e2e8f0" }}>
         <div className="flex items-center gap-3 px-2 py-2">

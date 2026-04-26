@@ -62,6 +62,7 @@ model User {
   passwordHash  String?
   avatar        String?
   isActive      Boolean   @default(true)
+  isSuperAdmin  Boolean   @default(false)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
