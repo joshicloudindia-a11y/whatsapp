@@ -42,25 +42,25 @@ const NAV = [
   {
     label: "Main",
     items: [
-      { href: "/dashboard", icon: GridIcon, label: "Dashboard" },
-      { href: "/inbox", icon: InboxIcon, label: "Inbox" },
-      { href: "/contacts", icon: UsersIcon, label: "Contacts" },
+      { href: "/dashboard", icon: GridIcon,     label: "Dashboard",  adminOnly: false },
+      { href: "/inbox",     icon: InboxIcon,    label: "Inbox",      adminOnly: false },
+      { href: "/contacts",  icon: UsersIcon,    label: "Contacts",   adminOnly: false },
     ],
   },
   {
     label: "Engagement",
     items: [
-      { href: "/broadcasts", icon: MegaphoneIcon, label: "Broadcasts" },
-      { href: "/templates", icon: DocumentIcon, label: "Templates" },
-      { href: "/chatbots", icon: BotIcon, label: "Chatbots" },
-      { href: "/automation", icon: ZapIcon, label: "Automation" },
+      { href: "/broadcasts",  icon: MegaphoneIcon, label: "Broadcasts",  adminOnly: false },
+      { href: "/templates",   icon: DocumentIcon,  label: "Templates",   adminOnly: false },
+      { href: "/chatbots",    icon: BotIcon,        label: "Chatbots",    adminOnly: false },
+      { href: "/automation",  icon: ZapIcon,        label: "Automation",  adminOnly: false },
     ],
   },
   {
     label: "Insights",
     items: [
-      { href: "/analytics", icon: ChartIcon, label: "Analytics" },
-      { href: "/settings", icon: SettingsIcon, label: "Settings" },
+      { href: "/analytics", icon: ChartIcon,    label: "Analytics", adminOnly: true },
+      { href: "/settings",  icon: SettingsIcon, label: "Settings",  adminOnly: true },
     ],
   },
 ];
@@ -70,6 +70,7 @@ const NAV = [
 export function Sidebar() {
   const pathname = usePathname();
   const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "ADMIN";
 
   return (
     <aside className="w-60 flex flex-col border-r bg-white shrink-0" style={{ borderColor: "#e2e8f0" }}>
@@ -92,7 +93,7 @@ export function Sidebar() {
               {section.label}
             </p>
             <div className="space-y-0.5">
-              {section.items.map((item) => {
+              {section.items.filter((item) => !item.adminOnly || isAdmin).map((item) => {
                 const active = pathname === item.href || pathname.startsWith(item.href + "/");
                 return (
                   <Link

@@ -20,7 +20,7 @@ export default function SettingsPage() {
     { id: "whatsapp",     label: "WhatsApp" },
     { id: "team",         label: "Team" },
     { id: "api-keys",     label: "API Keys" },
-    { id: "billing",      label: "Plans & Billing", adminOnly: true },
+    { id: "billing",      label: "My Subscription",  adminOnly: true },
   ];
 
   return (
@@ -48,7 +48,7 @@ export default function SettingsPage() {
         {tab === "whatsapp"     && <WhatsappSettings />}
         {tab === "team"         && <TeamSettings />}
         {tab === "api-keys"     && <ApiKeysSettings />}
-        {tab === "billing"      && isAdmin && <BillingAdminSettings />}
+        {tab === "billing"      && isAdmin && <MySubscription />}
       </div>
     </div>
   );
