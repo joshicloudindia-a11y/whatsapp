@@ -15,10 +15,15 @@ export async function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
-  const token = await getToken({
-    req,
-    secret: process.env.NEXTAUTH_SECRET ?? process.env.AUTH_SECRET,
-  });
+  let token = null;
+  try {
+    token = await getToken({
+      req,
+      secret: process.env.NEXTAUTH_SECRET ?? process.env.AUTH_SECRET,
+    });
+  } catch {
+    // If token verification fails, treat as unauthenticated
+  }
 
   if (!token) {
     const loginUrl = new URL("/login", req.url);
