@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { stripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { z } from "zod";
 
 const schema = z.object({
@@ -25,15 +25,17 @@ export async function POST(req: NextRequest) {
   const priceId = body.interval === "annual" ? plan.stripePriceAnnual : plan.stripePriceMonthly;
   if (!priceId) {
     return NextResponse.json(
-      { error: "This plan is not yet configured for online payment. Please contact us." },
+      { error: "This plan is not configured for online payment. Please contact us." },
       { status: 400 }
     );
   }
 
-  // Get or create Stripe customer
-  let sub = await prisma.subscription.findUnique({ where: { organizationId: orgId } });
+  const stripe = getStripe();
 
+  // Get or create Stripe customer
+  const sub = await prisma.subscription.findUnique({ where: { organizationId: orgId } });
   let customerId = sub?.stripeCustomerId ?? null;
+
   if (!customerId) {
     const org = await prisma.organization.findUnique({
       where: { id: orgId },
@@ -46,7 +48,6 @@ export async function POST(req: NextRequest) {
       metadata: { organizationId: orgId },
     });
     customerId = customer.id;
-    // Save customer ID immediately
     if (sub) {
       await prisma.subscription.update({
         where: { organizationId: orgId },
