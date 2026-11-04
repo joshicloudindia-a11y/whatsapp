@@ -48,6 +48,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { whatsappAccount, contact } = conversation;
     let wamid: string | undefined;
 
+    if (!["text", "template", "image", "video", "audio", "document"].includes(type)) {
+      return NextResponse.json({ error: "Unsupported message type" }, { status: 400 });
+    }
+    if (type === "text" && !String(content ?? "").trim()) {
+      return NextResponse.json({ error: "Message can't be empty" }, { status: 400 });
+    }
+    if (type === "template" && !templateName) {
+      return NextResponse.json({ error: "Choose a template" }, { status: 400 });
+    }
+    if (!whatsappAccount.isActive) {
+      return NextResponse.json({ error: "This WhatsApp number is disabled. Enable it in Settings → WhatsApp." }, { status: 400 });
+    }
+    // WhatsApp only allows free-form replies within 24h of the customer's last message.
+    const windowOpen = !!conversation.sessionExpiresAt && conversation.sessionExpiresAt > new Date();
+    if (type !== "template" && !windowOpen) {
+      return NextResponse.json({ error: "The 24-hour reply window has closed. Send an approved template to restart the conversation.", code: "WINDOW_CLOSED" }, { status: 400 });
+    }
+
     const phoneNumberId = whatsappAccount.phoneNumberId;
 
     if (type === "text") {
@@ -100,7 +118,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     await prisma.conversation.update({
       where: { id: conversation.id },
-      data: { lastMessageAt: new Date() },
+      data: {
+        lastMessageAt: new Date(),
+        isRead: true,
+        // Replying re-opens a resolved chat and claims it if nobody owns it yet.
+        ...(conversation.status !== "OPEN" && { status: "OPEN" }),
+        ...(!conversation.assignedAgentId && { assignedAgentId: session.user.id }),
+      },
     });
 
     await pusherServer.trigger(conversationChannel(conversation.id), PUSHER_EVENTS.NEW_MESSAGE, { message });
