@@ -94,9 +94,9 @@ export function OrganizationSettings() {
         <SettingsCard title="Workspace details" description={canEdit ? "Only organization admins can change these." : "Only organization admins can change these details."} icon="apartment"
           footer={canEdit && <SButton type="submit" loading={saving} disabled={!dirty || form.name.trim().length < 2}>Save changes</SButton>}>
           <div className="grid gap-4 sm:grid-cols-2">
-            <SField label="Organization name"><input className={sInput} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={!canEdit} maxLength={120} /></SField>
+            <SField label="Business name *"><input className={sInput} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={!canEdit} maxLength={120} /></SField>
             <SField label="Workspace URL slug" hint="Permanent identifier, can't be changed."><input className={`${sInput} font-mono`} value={org.slug} disabled /></SField>
-            <SField label="Website"><input type="url" className={sInput} value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} disabled={!canEdit} placeholder="https://yourbusiness.com" /></SField>
+            <SField label="Website (optional)" hint="https:// is added automatically."><input type="text" inputMode="url" autoComplete="url" className={sInput} value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} disabled={!canEdit} placeholder="sunjewellers.com" /></SField>
             <SField label="Logo URL" hint="Square image, at least 128×128."><input type="url" className={sInput} value={form.logo} onChange={(e) => setForm({ ...form, logo: e.target.value })} disabled={!canEdit} placeholder="https://…/logo.png" /></SField>
             <div className="sm:col-span-2">
               <SField label="Timezone" hint={`Used for scheduled broadcasts and reports. Local time there: ${localTime}`}>

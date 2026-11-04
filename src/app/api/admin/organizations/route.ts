@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Plan, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { audit, requireAdmin } from "@/lib/admin-auth";
-import { slugify } from "@/lib/utils";
+import { normalizeWebsite, slugify } from "@/lib/utils";
 
 const PLANS: Plan[] = ["TRIAL", "GROWTH", "PRO", "BUSINESS"];
 
@@ -45,10 +45,11 @@ export async function POST(req: NextRequest) {
   const name = String(body.name ?? "").trim().slice(0, 120);
   const plan = (body.plan ?? "TRIAL") as Plan;
   const slug = slugify(String(body.slug || name)).slice(0, 60);
-  const website = body.website ? String(body.website).trim().slice(0, 255) : null;
+  const website = normalizeWebsite(body.website);
   const timezone = body.timezone ? String(body.timezone).slice(0, 64) : undefined;
 
-  if (!name) return NextResponse.json({ error: "Organization name is required" }, { status: 400 });
+  if (name.length < 2) return NextResponse.json({ error: "Business name is required" }, { status: 400 });
+  if (website === undefined) return NextResponse.json({ error: "Enter a valid website, e.g. sunjewellers.com (or leave it empty)" }, { status: 400 });
   if (!slug) return NextResponse.json({ error: "Valid slug is required" }, { status: 400 });
   if (!PLANS.includes(plan)) return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
 

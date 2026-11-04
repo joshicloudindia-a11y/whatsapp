@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Plan, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { audit, requireAdmin } from "@/lib/admin-auth";
-import { slugify } from "@/lib/utils";
+import { normalizeWebsite, slugify } from "@/lib/utils";
 
 type Params = { params: Promise<{ id: string }> };
 const PLANS: Plan[] = ["TRIAL", "GROWTH", "PRO", "BUSINESS"];
@@ -43,7 +43,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (!slug) return NextResponse.json({ error: "Invalid slug" }, { status: 400 });
     data.slug = slug;
   }
-  if (body.website !== undefined) data.website = body.website ? String(body.website).trim().slice(0, 255) : null;
+  if (body.website !== undefined) {
+    const website = normalizeWebsite(body.website);
+    if (website === undefined) return NextResponse.json({ error: "Enter a valid website, e.g. sunjewellers.com (or leave it empty)" }, { status: 400 });
+    data.website = website;
+  }
   if (body.timezone !== undefined) data.timezone = String(body.timezone).slice(0, 64);
   if (body.plan !== undefined) {
     if (!PLANS.includes(body.plan)) return NextResponse.json({ error: "Invalid plan" }, { status: 400 });

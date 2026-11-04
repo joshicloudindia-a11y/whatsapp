@@ -203,12 +203,12 @@ function OrgFormModal({ org, onClose, onSaved }: { org: OrgRow | null; onClose: 
       </>}
     >
       <form id="org-form" onSubmit={submit} className="space-y-4">
-        <Field label="Name"><input className={inputCls} value={form.name} onChange={(e) => set("name", e.target.value)} required maxLength={120} /></Field>
+        <Field label="Business name *" hint="Shown to the team and used for the workspace URL."><input className={inputCls} value={form.name} onChange={(e) => set("name", e.target.value)} required minLength={2} maxLength={120} placeholder="e.g. Sun Jewellers" autoFocus={!org} /></Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Slug" hint={org ? "Changing the slug can break existing links." : "Leave empty to generate from name."}>
             <input className={`${inputCls} font-mono`} value={form.slug} onChange={(e) => set("slug", e.target.value)} placeholder="acme-inc" />
           </Field>
-          <Field label="Website"><input type="url" className={inputCls} value={form.website} onChange={(e) => set("website", e.target.value)} placeholder="https://" /></Field>
+          <Field label="Website (optional)" hint="https:// is added automatically."><input type="text" inputMode="url" autoComplete="url" className={inputCls} value={form.website} onChange={(e) => set("website", e.target.value)} placeholder="sunjewellers.com" /></Field>
         </div>
         <Field label="Plan">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">

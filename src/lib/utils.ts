@@ -62,3 +62,20 @@ export const PLAN_LIMITS = {
   PRO:      { users: 5,  broadcasts: 999999,  automationTriggers: 2000,  apiCalls: 200000,   aiCredits: 500 },
   BUSINESS: { users: 5,  broadcasts: 999999,  automationTriggers: 5000,  apiCalls: 20000000, aiCredits: 1500 },
 };
+
+/**
+ * Normalises an optional website: "" → null, "sunjewellers.com" → "https://sunjewellers.com".
+ * Returns undefined when the value isn't a plausible web address.
+ */
+export function normalizeWebsite(input: unknown): string | null | undefined {
+  const raw = String(input ?? "").trim();
+  if (!raw) return null;
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const u = new URL(withScheme);
+    if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".") || /\s/.test(raw)) return undefined;
+    return u.toString().replace(/\/$/, "").slice(0, 255);
+  } catch {
+    return undefined;
+  }
+}

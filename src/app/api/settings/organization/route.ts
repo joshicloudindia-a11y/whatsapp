@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgMember } from "@/lib/org-auth";
+import { normalizeWebsite } from "@/lib/utils";
 
 const TIMEZONES = new Set(Intl.supportedValuesOf("timeZone"));
 
@@ -28,10 +29,15 @@ export async function PATCH(req: NextRequest) {
 
   if (body.name !== undefined) {
     const name = String(body.name).trim().replace(/\s+/g, " ").slice(0, 120);
-    if (name.length < 2) return NextResponse.json({ error: "Organization name must be at least 2 characters" }, { status: 400 });
+    if (name.length < 2) return NextResponse.json({ error: "Business name must be at least 2 characters" }, { status: 400 });
     data.name = name;
   }
-  for (const k of ["website", "logo"] as const) {
+  if (body.website !== undefined) {
+    const website = normalizeWebsite(body.website);
+    if (website === undefined) return NextResponse.json({ error: "Enter a valid website, e.g. sunjewellers.com (or leave it empty)" }, { status: 400 });
+    data.website = website;
+  }
+  for (const k of ["logo"] as const) {
     if (body[k] === undefined) continue;
     const v = String(body[k] ?? "").trim();
     if (v && !/^https?:\/\/[^\s]+\.[^\s]+$/i.test(v)) return NextResponse.json({ error: `${k === "logo" ? "Logo URL" : "Website"} must start with http:// or https://` }, { status: 400 });
