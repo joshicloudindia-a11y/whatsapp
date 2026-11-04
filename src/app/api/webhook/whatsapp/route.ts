@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { parseWebhookMessage, verifyWebhookSignature, sendTextMessage } from "@/lib/whatsapp";
+import { applyReaction, asExtras, mergeExtras, messagePreview, type MessageExtras, type WaContact } from "@/components/inbox/message-extras"; // [chat]
 import { pusherServer, PUSHER_EVENTS, orgChannel, conversationChannel } from "@/lib/pusher";
 import { applyRecipientStatus } from "@/lib/broadcast-runner";
+import { handleCallsEntry } from "@/lib/calling"; // [calls]
 import { emitContactCreated, emitMessageReceived, emitMessageStatus } from "@/lib/outgoing-webhooks"; // [webhooks]
 import { runChatbotForInbound } from "@/lib/chatbot-runtime"; // [chatbot]
 import { runInboundAutomations } from "@/lib/automation-runtime"; // [automation]
@@ -105,12 +107,20 @@ async function processPayload(body: any) {
         console.error("[webhook] Failed to process change:", err);
       }
     }
+    // [calls] WhatsApp Calling API events (field "calls"). Finds the account itself; never throws.
+    await handleCallsEntry(entry);
   }
 }
 
 async function handleInboundMessage(msg: any, waAccount: any, contacts: any[]) {
   // Meta may deliver the same event more than once – wamid is unique.
   if (msg.id && (await prisma.message.findUnique({ where: { wamid: msg.id }, select: { id: true } }))) {
+    return;
+  }
+
+  // [chat] Reactions never become chat bubbles: attach them to the target message. Never throws.
+  if (msg.type === "reaction") {
+    await handleInboundReaction(msg, waAccount.organizationId);
     return;
   }
 
@@ -156,7 +166,9 @@ async function handleInboundMessage(msg: any, waAccount: any, contacts: any[]) {
     );
   }
 
-  const { type, content, mediaUrl, mediaType } = extractMessageContent(msg);
+  const { type, content, mediaUrl, mediaType, extras } = extractMessageContent(msg);
+  // [chat] Quoted reply / forwarded flags from the inbound `context` object.
+  const chatExtras = await buildInboundExtras(msg, waAccount.organizationId, extras);
 
   const message = await prisma.message.create({
     data: {
@@ -169,6 +181,7 @@ async function handleInboundMessage(msg: any, waAccount: any, contacts: any[]) {
       content,
       mediaUrl,
       mediaType,
+      ...(chatExtras && { interactive: chatExtras as never }),
     },
   });
   // [webhooks] Notify the org's outgoing webhooks (never throws).
@@ -304,33 +317,116 @@ async function handleStatusUpdate(status: any, organizationId: string) {
   }
 }
 
-function extractMessageContent(msg: any) {
+/** [chat] Inbound reaction: `reaction.emoji` absent/empty = the customer removed their reaction. */
+async function handleInboundReaction(msg: { reaction?: { message_id?: unknown; emoji?: unknown } }, organizationId: string) {
+  try {
+    const targetWamid = msg?.reaction?.message_id;
+    const rawEmoji = msg?.reaction?.emoji;
+    if (typeof targetWamid !== "string" || !targetWamid) return;
+    const target = await prisma.message.findFirst({
+      where: { wamid: targetWamid, organizationId },
+      select: { id: true, conversationId: true, interactive: true },
+    });
+    if (!target) return;
+    const emoji = typeof rawEmoji === "string" && rawEmoji ? rawEmoji.slice(0, 16) : null;
+    const reactions = applyReaction(asExtras(target.interactive).reactions, emoji, { contact: true });
+    await prisma.message.update({ where: { id: target.id }, data: { interactive: mergeExtras(target.interactive, { reactions }) as never } });
+    await pusherServer.trigger(conversationChannel(target.conversationId), PUSHER_EVENTS.MESSAGE_STATUS_UPDATE, { messageId: target.id, reaction: emoji });
+  } catch (err) {
+    console.error("[chat] inbound reaction failed:", err);
+  }
+}
+
+/** [chat] Adds reply context (resolved preview of the quoted message) and the forwarded flag. Never throws. */
+async function buildInboundExtras(msg: { context?: { id?: unknown; forwarded?: boolean; frequently_forwarded?: boolean } }, organizationId: string, extras: MessageExtras): Promise<MessageExtras | null> {
+  const out: MessageExtras = { ...extras };
+  try {
+    const ctx = msg?.context;
+    if (ctx?.forwarded || ctx?.frequently_forwarded) out.forwarded = true;
+    if (typeof ctx?.id === "string" && ctx.id) {
+      const quoted = await prisma.message.findFirst({
+        where: { wamid: ctx.id, organizationId },
+        select: { id: true, type: true, direction: true, content: true, mediaCaption: true, templateName: true, interactive: true },
+      });
+      out.context = quoted
+        ? { wamid: ctx.id, messageId: quoted.id, preview: messagePreview(quoted), type: quoted.type, direction: quoted.direction }
+        : { wamid: ctx.id, messageId: null, preview: null };
+    }
+  } catch (err) {
+    console.error("[chat] inbound context failed:", err);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/** [chat] Inbound contact card as Meta sends it (fields may be missing). */
+interface RawWaContact {
+  name?: { formatted_name?: string; first_name?: string };
+  phones?: { phone?: string; wa_id?: string; type?: string }[];
+  emails?: { email?: string; type?: string }[];
+  org?: { company?: string; title?: string };
+}
+
+function extractMessageContent(msg: any): { type: string; content: string | null; mediaUrl: string | null; mediaType: string | null; extras: MessageExtras } {
+  const none = { mediaUrl: null, mediaType: null, extras: {} };
   switch (msg.type) {
     case "text":
-      return { type: "TEXT", content: msg.text?.body ?? null, mediaUrl: null, mediaType: null };
+      return { ...none, type: "TEXT", content: msg.text?.body ?? null };
     case "image":
-      return { type: "IMAGE", content: msg.image?.caption ?? null, mediaUrl: msg.image?.id ?? null, mediaType: "image" };
+      return { ...none, type: "IMAGE", content: msg.image?.caption ?? null, mediaUrl: msg.image?.id ?? null, mediaType: "image" };
     case "video":
-      return { type: "VIDEO", content: msg.video?.caption ?? null, mediaUrl: msg.video?.id ?? null, mediaType: "video" };
+      return { ...none, type: "VIDEO", content: msg.video?.caption ?? null, mediaUrl: msg.video?.id ?? null, mediaType: "video" };
     case "sticker":
-      return { type: "STICKER", content: null, mediaUrl: msg.sticker?.id ?? null, mediaType: msg.sticker?.mime_type ?? "image/webp" };
+      return { ...none, type: "STICKER", content: null, mediaUrl: msg.sticker?.id ?? null, mediaType: msg.sticker?.mime_type ?? "image/webp" };
     case "audio":
-      return { type: "AUDIO", content: null, mediaUrl: msg.audio?.id ?? null, mediaType: "audio" };
+      return { ...none, type: "AUDIO", content: null, mediaUrl: msg.audio?.id ?? null, mediaType: "audio" };
     case "document":
-      return { type: "DOCUMENT", content: msg.document?.filename ?? null, mediaUrl: msg.document?.id ?? null, mediaType: "document" };
-    case "location":
+      return { ...none, type: "DOCUMENT", content: msg.document?.filename ?? null, mediaUrl: msg.document?.id ?? null, mediaType: "document" };
+    case "location": {
+      const l = msg.location ?? {};
+      const latitude = Number(l.latitude), longitude = Number(l.longitude);
+      const name = typeof l.name === "string" ? l.name.slice(0, 200) : undefined;
+      const address = typeof l.address === "string" ? l.address.slice(0, 500) : undefined;
+      const url = typeof l.url === "string" ? l.url.slice(0, 500) : undefined;
       return {
+        ...none,
         type: "LOCATION",
-        content: JSON.stringify({ lat: msg.location?.latitude, lng: msg.location?.longitude }),
-        mediaUrl: null, mediaType: null,
+        content: JSON.stringify({ lat: l.latitude, lng: l.longitude, ...(name && { name }), ...(address && { address }) }),
+        extras: Number.isFinite(latitude) && Number.isFinite(longitude)
+          ? { location: { latitude, longitude, ...(name && { name }), ...(address && { address }), ...(url && { url }) } } : {},
       };
-    case "interactive":
+    }
+    case "contacts": {
+      const raw: RawWaContact[] = Array.isArray(msg.contacts) ? msg.contacts : [];
+      const cards: WaContact[] = raw.slice(0, 20).map((c) => ({
+        name: { formatted_name: String(c?.name?.formatted_name ?? c?.name?.first_name ?? "Contact").slice(0, 200), ...(c?.name?.first_name && { first_name: String(c.name.first_name).slice(0, 100) }) },
+        phones: (Array.isArray(c?.phones) ? c.phones : []).slice(0, 5).map((p) => ({ phone: p?.phone ? String(p.phone).slice(0, 40) : undefined, wa_id: p?.wa_id ? String(p.wa_id).slice(0, 40) : undefined, type: p?.type ? String(p.type).slice(0, 20) : undefined })),
+        emails: (Array.isArray(c?.emails) ? c.emails : []).slice(0, 3).map((e) => ({ email: e?.email ? String(e.email).slice(0, 191) : undefined, type: e?.type ? String(e.type).slice(0, 20) : undefined })),
+        ...(c?.org?.company && { org: { company: String(c.org.company).slice(0, 120), ...(c.org.title && { title: String(c.org.title).slice(0, 120) }) } }),
+      }));
+      return { ...none, type: "CONTACTS", content: cards.length ? `Contact: ${cards.map((c) => c.name.formatted_name).join(", ")}` : null, extras: cards.length ? { contacts: cards } : {} };
+    }
+    case "interactive": {
+      const i = msg.interactive ?? {};
+      const r = i.button_reply ?? i.list_reply;
+      const kind = i.button_reply ? "button_reply" : i.list_reply ? "list_reply" : i.nfm_reply ? "nfm_reply" : null;
+      const title = r?.title ?? (i.nfm_reply ? (i.nfm_reply.body ?? "Form response") : null);
       return {
+        ...none,
         type: "INTERACTIVE",
-        content: msg.interactive?.button_reply?.title ?? msg.interactive?.list_reply?.title ?? null,
-        mediaUrl: null, mediaType: null,
+        content: title ?? null,
+        extras: kind && title ? { reply: { kind, title: String(title).slice(0, 200), ...(r?.id && { id: String(r.id).slice(0, 256) }), ...(r?.description && { description: String(r.description).slice(0, 200) }) } } : {},
+      };
+    }
+    case "button":
+      // Template quick-reply tap.
+      return {
+        ...none,
+        type: "INTERACTIVE",
+        content: msg.button?.text ?? msg.button?.payload ?? null,
+        extras: msg.button?.text || msg.button?.payload
+          ? { reply: { kind: "button", title: String(msg.button.text ?? msg.button.payload).slice(0, 200), ...(msg.button.payload && { id: String(msg.button.payload).slice(0, 256) }) } } : {},
       };
     default:
-      return { type: "TEXT", content: null, mediaUrl: null, mediaType: null };
+      return { ...none, type: "TEXT", content: null };
   }
 }

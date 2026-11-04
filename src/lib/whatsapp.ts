@@ -375,3 +375,68 @@ export async function sendMediaById({
     [type]: mediaObj,
   });
 }
+
+// ─── [chat] Rich chat sends (reply context, reactions, typing, location, contacts) ─
+
+export interface SendRichMessagePayload {
+  to: string;
+  /** Cloud API message type, e.g. "text", "image", "location", "contacts", "interactive". */
+  type: "text" | "image" | "video" | "audio" | "document" | "sticker" | "location" | "contacts" | "interactive";
+  /** The object placed under `[type]` (an array for `contacts`). */
+  content: object;
+  /** wamid of the message being replied to → `context.message_id` (quoted reply). */
+  contextMessageId?: string | null;
+  accessToken: string;
+  phoneNumberId: string;
+}
+
+/** Sends any free-form message type, optionally as a contextual (quoted) reply. */
+export async function sendRichMessage({ to, type, content, contextMessageId, accessToken, phoneNumberId }: SendRichMessagePayload) {
+  return metaPost(phoneNumberId, accessToken, {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to,
+    ...(contextMessageId && { context: { message_id: contextMessageId } }),
+    type,
+    [type]: content,
+  });
+}
+
+/**
+ * Reacts to a message (`emoji` = "" removes the business's reaction).
+ * Reactions can't be contextual replies and fail for targets older than 30 days.
+ */
+export async function sendReaction({ to, messageId, emoji, accessToken, phoneNumberId }: {
+  to: string; messageId: string; emoji: string; accessToken: string; phoneNumberId: string;
+}) {
+  return metaPost(phoneNumberId, accessToken, {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to,
+    type: "reaction",
+    reaction: { message_id: messageId, emoji },
+  });
+}
+
+/**
+ * Marks an inbound message read AND shows the "typing…" indicator to the customer.
+ * WhatsApp clears it when we reply or after ~25 seconds.
+ */
+export async function sendTypingIndicator(wamid: string, accessToken: string, phoneNumberId: string) {
+  return metaPost(phoneNumberId, accessToken, {
+    messaging_product: "whatsapp",
+    status: "read",
+    message_id: wamid,
+    typing_indicator: { type: "text" },
+  });
+}
+
+/** Downloads a WhatsApp-hosted media file (used to re-upload when forwarding). */
+export async function downloadMedia(mediaId: string, accessToken: string, phoneNumberId?: string): Promise<{ blob: Blob; mimeType: string }> {
+  const lookup = await getMediaInfo(mediaId, accessToken, phoneNumberId);
+  if (!lookup.ok) throw new Error(metaErrorMessage(lookup.error, "This media is no longer available on WhatsApp"));
+  const res = await fetch(lookup.info.url, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  if (!res.ok) throw new Error("Could not download the media from WhatsApp");
+  const blob = await res.blob();
+  return { blob, mimeType: lookup.info.mime_type ?? blob.type ?? "application/octet-stream" };
+}

@@ -1,5 +1,6 @@
 "use client";
 
+import { CallButtons, CallLogBubble as CallLog, IncomingCallListener } from "@/components/inbox/call-buttons"; // [calls]
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,6 +10,20 @@ import { useSession } from "next-auth/react";
 import { Icon } from "@/components/ui/icon";
 import { pusherClient, PUSHER_EVENTS, orgChannel, conversationChannel, REALTIME_ENABLED } from "@/lib/pusher";
 import { cn, getInitials, timeAgo } from "@/lib/utils";
+// [chat] WhatsApp-style chat features
+import type { ChatMessage } from "@/components/inbox/types";
+import { asExtras, mergeExtras, messagePreview, toggleId } from "@/components/inbox/message-extras";
+import { QUICK_REACTIONS } from "@/components/inbox/emoji-data";
+import { EmojiPicker } from "@/components/inbox/emoji-picker";
+import { PopoverMenu, type MenuItem } from "@/components/inbox/popover-menu";
+import { VoiceRecorderButton, useVoiceSupported } from "@/components/inbox/voice-recorder";
+import { setChatCleared, setConversationMuted, useChatClearedAt, useConversationMuted } from "@/components/inbox/chat-prefs";
+import {
+  ContactsCard, ForwardedLabel, InboundReplyTag, InteractivePreview, LocationCard, QuotedBlock, ReactionChips, SystemBubble, highlight,
+} from "@/components/inbox/bubble-parts";
+import {
+  ConfirmDialog, ContactCardDialog, ForwardDialog, InteractiveDialog, LocationDialog, MessageInfoDialog, StarredDialog,
+} from "@/components/inbox/chat-dialogs";
 
 // Without Pusher, poll so new messages still appear.
 const POLL_MS = REALTIME_ENABLED ? false : 5000;
@@ -23,14 +38,10 @@ interface ListConversation {
   labels: { label: { id: string; name: string; color: string } }[];
   messages: { content: string | null; type: string; direction: "INBOUND" | "OUTBOUND"; status: string; createdAt: string }[];
 }
-interface Message {
-  id: string; direction: "INBOUND" | "OUTBOUND"; type: string; status: string; content: string | null; mediaType: string | null; mediaUrl?: string | null;
-  mediaCaption: string | null; templateName: string | null; failureReason: string | null; isBotMessage: boolean; createdAt: string;
-  sentByUser: { id: string; name: string | null } | null; pending?: boolean;
-}
+type Message = ChatMessage;
 interface Detail {
   id: string; status: Status; isRead: boolean; createdAt: string; sessionExpiresAt: string | null; lastMessageAt: string | null;
-  contact: { id: string; name: string | null; phone: string; email: string | null; stage: string; createdAt: string; notes: string | null; tags: { tag: string }[]; _count: { conversations: number } };
+  contact: { id: string; name: string | null; phone: string; email: string | null; stage: string; isBlocked: boolean; optedOut: boolean; createdAt: string; notes: string | null; tags: { tag: string }[]; _count: { conversations: number } };
   assignedAgent: { id: string; name: string | null; email: string } | null;
   assignedTeam: { id: string; name: string } | null;
   labels: { label: { id: string; name: string; color: string } }[];
@@ -80,8 +91,9 @@ function Avatar({ name, size = "md" }: { name: string; size?: "sm" | "md" | "lg"
 
 function preview(m?: ListConversation["messages"][number]) {
   if (!m) return "No messages yet";
+  if (m.type === "LOCATION") return "Location";
   if (m.content) return m.content;
-  const map: Record<string, string> = { IMAGE: "Photo", VIDEO: "Video", AUDIO: "Voice message", DOCUMENT: "Document", STICKER: "Sticker", LOCATION: "Location", TEMPLATE: "Template message" };
+  const map: Record<string, string> = { IMAGE: "Photo", VIDEO: "Video", AUDIO: "Voice message", DOCUMENT: "Document", STICKER: "Sticker", LOCATION: "Location", CONTACTS: "Contact card", INTERACTIVE: "Interactive message", TEMPLATE: "Template message", SYSTEM: "Call" };
   return map[m.type] ?? `[${m.type.toLowerCase()}]`;
 }
 
@@ -126,6 +138,8 @@ export default function InboxPage() {
 
   return (
     <div className="flex h-full min-h-0 bg-white">
+      {/* [calls] incoming WhatsApp calls (popup + ringing) */}
+      <IncomingCallListener organizationId={session?.user?.organizationId} onOpenConversation={select} />
       {/* ── Conversation list ── */}
       <aside className={cn("w-full md:w-[340px] lg:w-[380px] border-r border-slate-200 flex-col bg-white shrink-0 min-h-0", selectedId ? "hidden md:flex" : "flex")}>
         <div className="p-3 sm:p-4 space-y-3 border-b border-slate-100">
@@ -240,11 +254,25 @@ function ConversationRow({ c, active, onClick }: { c: ListConversation; active: 
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+type MsgPages = { pages: { messages: Message[]; page: number; hasMore?: boolean }[]; pageParams: unknown[] };
+
 function ChatArea({ conversationId, meta, onBack }: { conversationId: string; meta?: Meta; onBack: () => void }) {
   const qc = useQueryClient();
   const scroller = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
+  const menuBtn = useRef<HTMLButtonElement>(null);
   const [showInfo, setShowInfo] = useState(false);
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [chatMenu, setChatMenu] = useState(false);
+  const [dialog, setDialog] = useState<{ kind: "info" | "forward"; m: Message } | { kind: "starred" | "clear" | "block" } | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [showResults, setShowResults] = useState(false);
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const debouncedQ = useDebounced(searchQ.trim(), 350);
+  const myUserId = meta?.me.userId;
+  const muted = useConversationMuted(conversationId);
+  const clearedAt = useChatClearedAt(myUserId, conversationId);
 
   const { data: detail, refetch: refetchDetail } = useQuery({
     queryKey: ["conversation", conversationId],
@@ -254,12 +282,28 @@ function ChatArea({ conversationId, meta, onBack }: { conversationId: string; me
 
   const msgs = useInfiniteQuery({
     queryKey: ["messages", conversationId],
-    queryFn: ({ pageParam }) => axios.get(`/api/conversations/${conversationId}/messages`, { params: { page: pageParam } }).then((r) => r.data as { messages: Message[]; page: number }),
+    queryFn: ({ pageParam }) => axios.get(`/api/conversations/${conversationId}/messages`, { params: { page: pageParam } }).then((r) => r.data as { messages: Message[]; page: number; hasMore?: boolean }),
     initialPageParam: 1,
-    getNextPageParam: (last) => (last.messages.length === 50 ? last.page + 1 : undefined),
+    getNextPageParam: (last) => ((last.hasMore ?? last.messages.length === 50) ? last.page + 1 : undefined),
     refetchInterval: POLL_MS,
   });
-  const messages = useMemo(() => (msgs.data?.pages ?? []).slice().reverse().flatMap((p) => p.messages), [msgs.data]);
+  const allMessages = useMemo(() => (msgs.data?.pages ?? []).slice().reverse().flatMap((p) => p.messages), [msgs.data]);
+  // "Clear chat" is a per-user, per-browser view filter: nothing is deleted.
+  const messages = useMemo(() => (clearedAt ? allMessages.filter((m) => m.createdAt > clearedAt) : allMessages), [allMessages, clearedAt]);
+  const byWamid = useMemo(() => new Map(allMessages.filter((m) => m.wamid).map((m) => [m.wamid as string, m])), [allMessages]);
+
+  const searchResults = useQuery({
+    queryKey: ["chat-search", conversationId, debouncedQ],
+    queryFn: () => axios.get(`/api/conversations/${conversationId}/messages`, { params: { q: debouncedQ } })
+      .then((r) => r.data.results as { id: string; createdAt: string; direction: string; type: string; snippet: string }[]),
+    enabled: searchOpen && debouncedQ.length >= 2,
+    placeholderData: (p) => p,
+  });
+  const loadedMatches = useMemo(() => {
+    const q = debouncedQ.toLowerCase();
+    if (q.length < 2) return 0;
+    return messages.filter((m) => `${m.content ?? ""} ${m.mediaCaption ?? ""}`.toLowerCase().includes(q)).length;
+  }, [messages, debouncedQ]);
 
   // Real-time (when Pusher is configured).
   useEffect(() => {
@@ -305,8 +349,99 @@ function ChatArea({ conversationId, meta, onBack }: { conversationId: string; me
     } catch (e) { toast.error(err(e)); }
   };
 
+  // ── [chat] Message actions ──
+  const patchMessage = (id: string, fn: (m: Message) => Message | null) => {
+    qc.setQueryData(["messages", conversationId], (old: MsgPages | undefined) => old && {
+      ...old,
+      pages: old.pages.map((p) => ({ ...p, messages: p.messages.flatMap((m) => (m.id === id ? (fn(m) ?? []) : [m])) })),
+    });
+  };
+  const react = async (m: Message, emoji: string) => {
+    try {
+      const r = await axios.post(`/api/messages/${m.id}/react`, { emoji });
+      const reactions = r.data.reactions && Object.keys(r.data.reactions).length ? r.data.reactions : undefined;
+      patchMessage(m.id, (x) => ({ ...x, interactive: mergeExtras(x.interactive, { reactions }) }));
+    } catch (e) { toast.error(err(e, "Reaction not sent")); }
+  };
+  const star = async (m: Message, on: boolean) => {
+    try {
+      await axios.patch(`/api/messages/${m.id}`, { starred: on });
+      patchMessage(m.id, (x) => ({ ...x, interactive: mergeExtras(x.interactive, { starredBy: toggleId(asExtras(x.interactive).starredBy, myUserId ?? "", on) }) }));
+      qc.invalidateQueries({ queryKey: ["starred", conversationId] });
+      toast.success(on ? "Starred" : "Unstarred");
+    } catch (e) { toast.error(err(e)); }
+  };
+  const hide = async (m: Message) => {
+    try {
+      await axios.patch(`/api/messages/${m.id}`, { hidden: true });
+      patchMessage(m.id, () => null);
+      if (replyTo?.id === m.id) setReplyTo(null);
+      toast.success("Deleted for you", {
+        description: "The customer still has this message.",
+        action: { label: "Undo", onClick: () => { axios.patch(`/api/messages/${m.id}`, { hidden: false }).then(() => qc.invalidateQueries({ queryKey: ["messages", conversationId] })).catch(() => {}); } },
+      });
+    } catch (e) { toast.error(err(e)); }
+  };
+  const copy = (m: Message) => {
+    const text = m.content && m.type !== "LOCATION" ? m.content : messagePreview(m, 10_000);
+    navigator.clipboard.writeText(text).then(() => toast.success("Copied"), () => toast.error("Couldn't copy"));
+  };
+
+  /** Scrolls to a message, loading older pages if needed. */
+  const jumpTo = async (id: string) => {
+    const find = () => document.getElementById(`msg-${id}`);
+    let el = find();
+    for (let i = 0; !el && i < 40; i++) {
+      const cached = qc.getQueryData<MsgPages>(["messages", conversationId]);
+      const loaded = cached?.pages.some((p) => p.messages.some((m) => m.id === id));
+      if (loaded) { await new Promise((r) => setTimeout(r, 60)); el = find(); break; }
+      const lastPage = cached?.pages[cached.pages.length - 1];
+      if (!lastPage || !(lastPage.hasMore ?? lastPage.messages.length === 50)) break;
+      atBottom.current = false;
+      await msgs.fetchNextPage();
+      await new Promise((r) => setTimeout(r, 60));
+      el = find();
+    }
+    if (!el) { toast.message("That message isn't available here (it may have been deleted or cleared for you)."); return; }
+    atBottom.current = false;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    setFlashId(id);
+    setTimeout(() => setFlashId((f) => (f === id ? null : f)), 1800);
+  };
+
+  const setBlocked = async (blocked: boolean) => {
+    try {
+      await axios.post(`/api/conversations/${conversationId}/block`, { blocked });
+      toast.success(blocked ? "Contact blocked" : "Contact unblocked");
+      refetchDetail();
+    } catch (e) { toast.error(err(e)); }
+  };
+  const exportChat = (format: "txt" | "csv") => {
+    const a = document.createElement("a");
+    a.href = `/api/conversations/${conversationId}/export?format=${format}`;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
   const win = windowInfo(detail?.sessionExpiresAt ?? null);
   const name = detail ? displayName(detail.contact) : "…";
+  const blocked = !!detail?.contact.isBlocked;
+  const canSendFreeForm = win.open && !blocked && !detail?.contact.optedOut && !!detail?.whatsappAccount.isActive;
+
+  const chatMenuItems: MenuItem[] = [
+    { id: "info", label: "Contact info", icon: "info", onSelect: () => setShowInfo(true) },
+    { id: "search", label: "Search in chat", icon: "search", onSelect: () => setSearchOpen(true) },
+    { id: "starred", label: "Starred messages", icon: "star", onSelect: () => setDialog({ kind: "starred" }) },
+    { id: "mute", label: muted ? "Unmute notifications" : "Mute notifications", icon: muted ? "notifications" : "notifications_off", onSelect: () => { setConversationMuted(conversationId, !muted); toast.success(muted ? "Notifications on" : "Notifications muted on this device"); } },
+    { id: "txt", label: "Export chat (TXT)", icon: "download", onSelect: () => exportChat("txt") },
+    { id: "csv", label: "Export chat (CSV)", icon: "download", onSelect: () => exportChat("csv") },
+    ...(clearedAt
+      ? [{ id: "unclear", label: "Show cleared messages", icon: "visibility", onSelect: () => myUserId && setChatCleared(myUserId, conversationId, null) }]
+      : [{ id: "clear", label: "Clear chat", icon: "delete_sweep", onSelect: () => setDialog({ kind: "clear" }) }]),
+    { id: "block", label: blocked ? "Unblock contact" : "Block contact", icon: "block", danger: !blocked, onSelect: () => (blocked ? setBlocked(false) : setDialog({ kind: "block" })) },
+  ];
 
   // Group messages by day for separators.
   const groups = useMemo(() => {
@@ -322,6 +457,18 @@ function ChatArea({ conversationId, meta, onBack }: { conversationId: string; me
     return out;
   }, [messages]);
 
+  const actions: BubbleActions = {
+    onReply: (m) => setReplyTo(m),
+    onReact: react,
+    onInfo: (m) => setDialog({ kind: "info", m }),
+    onCopy: copy,
+    onForward: (m) => setDialog({ kind: "forward", m }),
+    onStar: star,
+    onHide: hide,
+    onJump: jumpTo,
+  };
+  const closeDialog = () => setDialog(null);
+
   return (
     <div className="flex-1 flex min-h-0">
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -333,7 +480,11 @@ function ChatArea({ conversationId, meta, onBack }: { conversationId: string; me
           <button onClick={() => setShowInfo((s) => !s)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
             <Avatar name={name} />
             <div className="min-w-0">
-              <p className="text-sm font-bold text-slate-900 truncate">{name}</p>
+              <p className="text-sm font-bold text-slate-900 truncate flex items-center gap-1">
+                {name}
+                {muted && <Icon name="notifications_off" className="w-3.5 h-3.5 text-slate-400" title="Muted" />}
+                {blocked && <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-600">Blocked</span>}
+              </p>
               <p className={cn("text-[11px] truncate flex items-center gap-1", !win.open ? "text-slate-500" : win.urgent ? "text-amber-600" : "text-green-600")}>
                 <Icon name="schedule" className="w-3 h-3" /> {detail ? win.label : "Loading…"}
               </p>
@@ -341,8 +492,11 @@ function ChatArea({ conversationId, meta, onBack }: { conversationId: string; me
           </button>
           {detail && (
             <div className="flex items-center gap-1.5 shrink-0">
+              {/* [calls] header buttons */}
+              <CallButtons conversationId={conversationId} windowOpen={win.open}
+                contact={{ id: detail.contact.id, name: detail.contact.name, phone: detail.contact.phone, isBlocked: detail.contact.isBlocked, optedOut: detail.contact.optedOut }} />
               <select value={detail.assignedAgent?.id ?? ""} onChange={(e) => assign(e.target.value)} aria-label="Assign conversation"
-                className="hidden sm:block max-w-[160px] rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-green-500/30">
+                className="hidden lg:block max-w-[160px] rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-green-500/30">
                 <option value="">Unassigned</option>
                 {meta?.members.map((m) => <option key={m.id} value={m.id}>{m.id === meta.me.userId ? `${m.name ?? m.email} (me)` : m.name ?? m.email}</option>)}
               </select>
@@ -355,13 +509,58 @@ function ChatArea({ conversationId, meta, onBack }: { conversationId: string; me
                   <Icon name="check_circle" className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Resolve</span>
                 </button>
               )}
+              <button onClick={() => setSearchOpen((s) => !s)} aria-label="Search in chat" aria-pressed={searchOpen}
+                className={cn("hidden sm:flex w-9 h-9 items-center justify-center rounded-lg border", searchOpen ? "border-green-200 bg-green-50 text-green-700" : "border-slate-200 text-slate-500 hover:bg-slate-50")}>
+                <Icon name="search" className="w-4 h-4" />
+              </button>
               <button onClick={() => setShowInfo((s) => !s)} aria-label="Contact details" aria-pressed={showInfo}
-                className={cn("w-9 h-9 flex items-center justify-center rounded-lg border", showInfo ? "border-green-200 bg-green-50 text-green-700" : "border-slate-200 text-slate-500 hover:bg-slate-50")}>
+                className={cn("hidden sm:flex w-9 h-9 items-center justify-center rounded-lg border", showInfo ? "border-green-200 bg-green-50 text-green-700" : "border-slate-200 text-slate-500 hover:bg-slate-50")}>
                 <Icon name="info" className="w-4 h-4" />
               </button>
+              <div className="relative">
+                <button ref={menuBtn} onClick={() => setChatMenu((o) => !o)} aria-label="Chat menu" aria-haspopup="menu" aria-expanded={chatMenu}
+                  className="w-9 h-9 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">
+                  <Icon name="more_vert" className="w-4 h-4" />
+                </button>
+                <PopoverMenu open={chatMenu} onClose={() => setChatMenu(false)} items={chatMenuItems} label="Chat menu" triggerRef={menuBtn} className="sm:w-60" />
+              </div>
             </div>
           )}
         </header>
+
+        {searchOpen && (
+          <div className="relative z-20 flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
+            <Icon name="search" className="w-4 h-4 text-slate-400" />
+            <input autoFocus value={searchQ} placeholder="Search this chat…" aria-label="Search this chat"
+              onChange={(e) => { setSearchQ(e.target.value); setShowResults(true); }}
+              onFocus={() => setShowResults(true)}
+              onKeyDown={(e) => { if (e.key === "Escape") { setSearchOpen(false); setSearchQ(""); } }}
+              className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none" />
+            {debouncedQ.length >= 2 && <span className="shrink-0 text-[11px] text-slate-400">{loadedMatches} on screen</span>}
+            <button onClick={() => { setSearchOpen(false); setSearchQ(""); }} aria-label="Close search" className="w-8 h-8 shrink-0 flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100">
+              <Icon name="close" className="w-4 h-4" />
+            </button>
+            {showResults && debouncedQ.length >= 2 && (
+              <div className="absolute left-2 right-2 top-full mt-1 max-h-72 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl">
+                {searchResults.isLoading ? <p className="p-4 text-xs text-slate-500">Searching…</p>
+                  : !searchResults.data?.length ? <p className="p-4 text-xs text-slate-500">No messages match “{debouncedQ}”.</p>
+                  : (
+                    <ul>
+                      <li className="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{searchResults.data.length}{searchResults.data.length === 50 ? "+" : ""} matches · newest first</li>
+                      {searchResults.data.map((r) => (
+                        <li key={r.id}>
+                          <button onClick={() => { setShowResults(false); jumpTo(r.id); }} className="w-full text-left px-4 py-2 hover:bg-slate-50">
+                            <span className="block text-[10px] text-slate-400">{r.direction === "OUTBOUND" ? "You" : name} · {new Date(r.createdAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</span>
+                            <span className="block text-xs text-slate-700 line-clamp-2">{highlight(r.snippet, debouncedQ)}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Messages */}
         <div ref={scroller} onScroll={(e) => { const el = e.currentTarget; atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}
@@ -374,6 +573,13 @@ function ChatArea({ conversationId, meta, onBack }: { conversationId: string; me
               </button>
             </div>
           )}
+          {clearedAt && (
+            <div className="flex justify-center pb-2">
+              <button onClick={() => myUserId && setChatCleared(myUserId, conversationId, null)} className="rounded-lg bg-white/90 px-3 py-1 text-[11px] text-slate-500 shadow-sm hover:bg-white">
+                You cleared this chat · show earlier messages
+              </button>
+            </div>
+          )}
           {msgs.isLoading && <div className="space-y-3">{[0, 1, 2].map((i) => <div key={i} className={cn("h-12 w-2/3 rounded-2xl bg-white/70 animate-pulse", i % 2 && "ml-auto")} />)}</div>}
           {groups.map((g) => (
             <div key={g.day} className="space-y-1">
@@ -382,15 +588,23 @@ function ChatArea({ conversationId, meta, onBack }: { conversationId: string; me
               </div>
               {g.items.map((m, i) => {
                 const prev = g.items[i - 1];
-                return <Bubble key={m.id} m={m} grouped={!!prev && prev.direction === m.direction} />;
+                const ctx = asExtras(m.interactive).context;
+                const quoted = ctx ? byWamid.get(ctx.wamid) : undefined;
+                return (
+                  <Bubble key={m.id} m={m} grouped={!!prev && prev.direction === m.direction && prev.type !== "SYSTEM"}
+                    myUserId={myUserId} contactName={name} search={searchOpen ? debouncedQ : ""} flash={flashId === m.id}
+                    quoted={quoted} canSend={canSendFreeForm} actions={actions} />
+                );
               })}
             </div>
           ))}
         </div>
 
         <Composer conversationId={conversationId} windowOpen={win.open} meta={meta} disabled={!detail}
+          blocked={blocked} optedOut={!!detail?.contact.optedOut} onUnblock={() => setBlocked(false)}
+          replyTo={replyTo} contactName={name} onCancelReply={() => setReplyTo(null)}
           onSent={(m) => {
-            qc.setQueryData(["messages", conversationId], (old: typeof msgs.data) => old && {
+            qc.setQueryData(["messages", conversationId], (old: MsgPages | undefined) => old && {
               ...old, pages: old.pages.map((p, i) => (i === 0 ? { ...p, messages: [...p.messages, m] } : p)),
             });
             atBottom.current = true;
@@ -408,42 +622,155 @@ function ChatArea({ conversationId, meta, onBack }: { conversationId: string; me
           </aside>
         </>
       )}
+
+      {dialog?.kind === "info" && <MessageInfoDialog m={dialog.m} onClose={closeDialog} />}
+      {dialog?.kind === "forward" && <ForwardDialog m={dialog.m} currentConversationId={conversationId} onClose={closeDialog} onDone={() => qc.invalidateQueries({ queryKey: ["conversations"] })} />}
+      {dialog?.kind === "starred" && <StarredDialog conversationId={conversationId} onClose={closeDialog} onJump={jumpTo} />}
+      {dialog?.kind === "clear" && (
+        <ConfirmDialog title="Clear this chat?" confirmLabel="Clear chat" danger onClose={closeDialog}
+          onConfirm={() => { if (myUserId) { setChatCleared(myUserId, conversationId, new Date()); setReplyTo(null); toast.success("Chat cleared for you"); } }}
+          body={<>Messages up to now will be hidden <b>for you on this device</b>. Nothing is deleted: teammates and the customer still see them, and exports include them. You can show them again from the chat menu.</>} />
+      )}
+      {dialog?.kind === "block" && (
+        <ConfirmDialog title={`Block ${name}?`} confirmLabel="Block" danger onClose={closeDialog} onConfirm={() => setBlocked(true)}
+          body={<>Nobody on your team will be able to message this contact, and broadcasts will skip them. Their incoming messages still arrive in the inbox. You can unblock at any time.</>} />
+      )}
     </div>
   );
 }
 
-function Bubble({ m, grouped }: { m: Message; grouped: boolean }) {
+interface BubbleActions {
+  onReply: (m: Message) => void;
+  onReact: (m: Message, emoji: string) => void;
+  onInfo: (m: Message) => void;
+  onCopy: (m: Message) => void;
+  onForward: (m: Message) => void;
+  onStar: (m: Message, on: boolean) => void;
+  onHide: (m: Message) => void;
+  onJump: (id: string) => void;
+}
+
+function Bubble({ m, grouped, myUserId, contactName, search, flash, quoted, canSend, actions }: {
+  m: Message; grouped: boolean; myUserId?: string; contactName: string; search: string; flash: boolean;
+  quoted?: Message; canSend: boolean; actions: BubbleActions;
+}) {
+  const [menu, setMenu] = useState(false);
+  const [place, setPlace] = useState<"below" | "above">("below");
+  const [picker, setPicker] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const press = useRef<number | undefined>(undefined);
+
+  if (m.type === "SYSTEM") {
+    const isCall = !!(m.templateData as { call?: unknown } | null)?.call;
+    return <div id={`msg-${m.id}`}>{isCall ? <CallLog message={m} /> : <SystemBubble m={m} />}</div>;
+  }
+
   const own = m.direction === "OUTBOUND";
+  const x = asExtras(m.interactive);
   const time = new Date(m.createdAt).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
   const isMedia = MEDIA_KINDS.includes(m.type);
-  let coords: { lat: number; lng: number } | null = null;
-  if (m.type === "LOCATION" && m.content) {
-    try { coords = JSON.parse(m.content); } catch { coords = null; }
-  }
-  const body: React.ReactNode = coords
-    ? <a className="underline" target="_blank" rel="noreferrer" href={`https://maps.google.com/?q=${coords.lat},${coords.lng}`}>Open location in Maps</a>
-    : m.type === "DOCUMENT" ? null // the filename is shown on the file card
-    : m.content;
+  const padded = isMedia && m.type !== "AUDIO" && m.type !== "DOCUMENT";
+  const starred = !!myUserId && !!x.starredBy?.includes(myUserId);
+  const temp = m.pending || m.id.startsWith("temp-");
+  const canReact = canSend && !!m.wamid && !temp;
+  const text = m.type === "LOCATION" || m.type === "CONTACTS" || m.type === "DOCUMENT" ? null : m.content;
   const caption = m.mediaCaption && m.mediaCaption !== m.content ? m.mediaCaption : null;
+
+  const open = () => {
+    if (temp) return;
+    const r = trigger.current?.closest("[data-bubble]")?.getBoundingClientRect();
+    setPicker(false);
+    setPlace(r && r.bottom > window.innerHeight - 360 ? "above" : "below");
+    setMenu(true);
+  };
+  const cancelPress = () => { if (press.current) { clearTimeout(press.current); press.current = undefined; } };
+
+  const items: MenuItem[] = [
+    { id: "reply", label: "Reply", icon: "reply", disabled: !canSend || !m.wamid, hint: !m.wamid ? "This message never reached WhatsApp" : !canSend ? "Replies need an open 24h window" : undefined, onSelect: () => actions.onReply(m) },
+    { id: "info", label: "Message info", icon: "info", onSelect: () => actions.onInfo(m) },
+    { id: "copy", label: "Copy text", icon: "content_copy", disabled: !messagePreview(m), onSelect: () => actions.onCopy(m) },
+    { id: "forward", label: "Forward", icon: "forward", onSelect: () => actions.onForward(m) },
+    { id: "star", label: starred ? "Unstar" : "Star", icon: "star", onSelect: () => actions.onStar(m, !starred) },
+    { id: "hide", label: "Delete for me", icon: "delete", danger: true, hint: "WhatsApp can't delete messages for everyone", onSelect: () => actions.onHide(m) },
+  ];
+
+  const reactionBar = canReact ? (
+    <div className="flex items-center gap-0.5 px-2 pb-1.5 mb-1 border-b border-slate-100">
+      {QUICK_REACTIONS.map((e) => {
+        const mine = !!myUserId && !!x.reactions?.[e]?.byUserIds?.includes(myUserId);
+        return (
+          <button key={e} role="menuitem" type="button" aria-label={mine ? `Remove ${e} reaction` : `React ${e}`}
+            onClick={() => { setMenu(false); actions.onReact(m, mine ? "" : e); }}
+            className={cn("w-9 h-9 rounded-full text-[20px] leading-none hover:bg-slate-100 focus:outline-none focus:bg-slate-100", mine && "bg-green-50")}>{e}</button>
+        );
+      })}
+      <button role="menuitem" type="button" aria-label="More reactions" onClick={() => { setMenu(false); setPicker(true); }}
+        className="w-9 h-9 flex items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 focus:outline-none focus:bg-slate-100">
+        <Icon name="add_reaction" className="w-5 h-5" />
+      </button>
+    </div>
+  ) : null;
+
+  let body: React.ReactNode = null;
+  if (m.type === "LOCATION") body = <LocationCard m={m} />;
+  else if (m.type === "CONTACTS") body = <ContactsCard m={m} />;
+
   return (
-    <div className={cn("flex", own ? "justify-end" : "justify-start", grouped ? "mt-0.5" : "mt-2")}>
-      <div className={cn("relative max-w-[85%] sm:max-w-[70%] min-w-0 rounded-2xl shadow-sm", isMedia && m.type !== "AUDIO" && m.type !== "DOCUMENT" ? "p-1 pb-1.5" : "px-3 py-2",
-        own ? "bg-[#d9fdd3] text-slate-900" : "bg-white text-slate-900", !grouped && (own ? "rounded-tr-sm" : "rounded-tl-sm"), m.pending && "opacity-70")}>
-        {own && !grouped && (m.sentByUser?.name || m.isBotMessage) && (
-          <p className={cn("text-[10px] font-semibold text-green-700 mb-0.5", isMedia && "px-2 pt-1")}>{m.isBotMessage ? "Chatbot" : m.sentByUser?.name}</p>
+    <div id={`msg-${m.id}`} className={cn("flex flex-col", own ? "items-end" : "items-start", grouped ? "mt-0.5" : "mt-2")}>
+      <div data-bubble
+        onTouchStart={() => { cancelPress(); press.current = window.setTimeout(open, 450); }}
+        onTouchEnd={cancelPress} onTouchMove={cancelPress} onTouchCancel={cancelPress}
+        onContextMenu={(e) => { if (window.matchMedia("(pointer: coarse)").matches) { e.preventDefault(); open(); } }}
+        className={cn("group relative max-w-[85%] sm:max-w-[70%] min-w-0 rounded-2xl shadow-sm transition-shadow select-text", padded ? "p-1 pb-1.5" : "px-3 py-2",
+          own ? "bg-[#d9fdd3] text-slate-900" : "bg-white text-slate-900", !grouped && (own ? "rounded-tr-sm" : "rounded-tl-sm"), m.pending && "opacity-70",
+          flash && "ring-2 ring-amber-400 ring-offset-2 ring-offset-[#efeae2]")}>
+        {!temp && (
+          <button ref={trigger} type="button" onClick={() => (menu ? setMenu(false) : open())} aria-label="Message actions" aria-haspopup="menu" aria-expanded={menu}
+            className={cn("absolute top-1 z-[2] w-7 h-7 flex items-center justify-center rounded-full bg-white/90 text-slate-500 shadow-sm transition-opacity",
+              "right-1", "opacity-0 group-hover:opacity-100 focus:opacity-100", menu && "opacity-100", "[@media(pointer:coarse)]:hidden")}>
+            <Icon name="expand_more" className="w-4 h-4" />
+          </button>
         )}
+        {own && !grouped && (m.sentByUser?.name || m.isBotMessage) && (
+          <p className={cn("text-[10px] font-semibold text-green-700 mb-0.5", padded && "px-2 pt-1")}>{m.isBotMessage ? "Chatbot" : m.sentByUser?.name}</p>
+        )}
+        <div className={cn(padded && "px-1 pt-0.5")}>
+          {x.forwarded && <ForwardedLabel />}
+          {x.context && (
+            <QuotedBlock ctx={x.context} own={own} contactName={contactName}
+              resolvedPreview={quoted ? messagePreview(quoted) : undefined} resolvedDirection={quoted?.direction}
+              onJump={quoted || x.context.messageId ? () => actions.onJump(quoted?.id ?? (x.context?.messageId as string)) : undefined} />
+          )}
+          {!own && <InboundReplyTag x={x} />}
+        </div>
         {isMedia && <MediaContent m={m} />}
         {m.type === "TEMPLATE" && <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-0.5">Template · {m.templateName}</p>}
-        <div className={cn(isMedia && m.type !== "AUDIO" && m.type !== "DOCUMENT" && "px-2")}>
-          {body && <p className={cn("text-[14px] leading-snug whitespace-pre-wrap break-words", isMedia && "mt-1")}>{body}</p>}
-          {caption && <p className="text-[13px] text-slate-700 mt-1 whitespace-pre-wrap break-words">{caption}</p>}
+        {m.type === "INTERACTIVE" && own && x.header?.text && <p className="text-[13px] font-bold">{x.header.text}</p>}
+        {body}
+        <div className={cn(padded && "px-2")}>
+          {text && <p className={cn("text-[14px] leading-snug whitespace-pre-wrap break-words", isMedia && "mt-1")}>{highlight(text, search)}</p>}
+          {caption && <p className="text-[13px] text-slate-700 mt-1 whitespace-pre-wrap break-words">{highlight(caption, search)}</p>}
         </div>
-        <div className={cn("mt-0.5 flex items-center justify-end gap-1 text-[10px] text-slate-400", isMedia && m.type !== "AUDIO" && m.type !== "DOCUMENT" && "px-2")}>
+        {m.type === "INTERACTIVE" && own && <InteractivePreview x={x} />}
+        <div className={cn("mt-0.5 flex items-center justify-end gap-1 text-[10px] text-slate-400", padded && "px-2")}>
+          {starred && <Icon name="star" filled className="w-3 h-3 text-amber-500" title="Starred" />}
           {time}
           {own && <Ticks status={m.pending ? "PENDING" : m.status} />}
         </div>
         {m.status === "FAILED" && m.failureReason && <p className={cn("mt-1 text-[11px] text-red-600", isMedia && "px-2")}>Failed: {m.failureReason}</p>}
+
+        <PopoverMenu open={menu} onClose={() => setMenu(false)} items={items} label="Message actions" triggerRef={trigger}
+          align={own ? "right" : "left"} placement={place} header={reactionBar} className="sm:w-64" />
+        {picker && (
+          <>
+            <div className="sm:hidden fixed inset-0 z-[55] bg-slate-950/30" aria-hidden onClick={() => setPicker(false)} />
+            <EmojiPicker triggerRef={trigger} onClose={() => setPicker(false)} onPick={(e) => { setPicker(false); actions.onReact(m, e); }}
+              className={cn("fixed inset-x-2 bottom-2 sm:inset-x-auto sm:bottom-auto sm:absolute", own ? "sm:right-0" : "sm:left-0", place === "above" ? "sm:bottom-full sm:mb-1" : "sm:top-full sm:mt-1")} />
+          </>
+        )}
       </div>
+      <ReactionChips reactions={x.reactions} own={own} myUserId={myUserId}
+        onToggle={canReact ? (emoji, business) => actions.onReact(m, business ? "" : emoji) : undefined} />
     </div>
   );
 }
@@ -627,8 +954,11 @@ function formatBytes(n: number) {
 }
 
 // ─── Composer ────────────────────────────────────────────────────────────────
-function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }: {
-  conversationId: string; windowOpen: boolean; meta?: Meta; disabled: boolean; onSent: (m: Message) => void; onDone: () => void;
+const TYPING_THROTTLE_MS = 20_000;
+
+function Composer({ conversationId, windowOpen, meta, disabled, blocked, optedOut, onUnblock, replyTo, contactName, onCancelReply, onSent, onDone }: {
+  conversationId: string; windowOpen: boolean; meta?: Meta; disabled: boolean; blocked: boolean; optedOut: boolean; onUnblock: () => void;
+  replyTo: Message | null; contactName: string; onCancelReply: () => void; onSent: (m: Message) => void; onDone: () => void;
 }) {
   const qc = useQueryClient();
   const [text, setText] = useState("");
@@ -636,12 +966,22 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
   const [showTemplates, setShowTemplates] = useState(false);
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [attachMenu, setAttachMenu] = useState(false);
+  const [extra, setExtra] = useState<null | "location" | "contact" | "button" | "list">(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const previewUrl = useRef<string | null>(null);
+  const emojiBtn = useRef<HTMLButtonElement>(null);
+  const attachBtn = useRef<HTMLButtonElement>(null);
+  const lastTyping = useRef(0);
+  const voiceOk = useVoiceSupported();
 
   // Release the local preview URL when the composer goes away.
   useEffect(() => () => { if (previewUrl.current) URL.revokeObjectURL(previewUrl.current); }, []);
+
+  // Focus the input when a reply is started.
+  useEffect(() => { if (replyTo) ref.current?.focus(); }, [replyTo]);
 
   const clearAttachment = () => {
     if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
@@ -656,9 +996,17 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
     if (!kind) { toast.error("Unsupported file. Send JPG/PNG, MP4, OGG/MP3/AAC/AMR audio, or PDF/Office/TXT documents."); return; }
     if (file.size > MAX_UPLOAD_BYTES) { toast.error(`"${file.name}" is ${formatBytes(file.size)}. Files must be 4 MB or smaller.`); return; }
     if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
-    previewUrl.current = kind === "image" || kind === "video" ? URL.createObjectURL(file) : null;
+    previewUrl.current = kind === "image" || kind === "video" || kind === "audio" ? URL.createObjectURL(file) : null;
     setAttachment({ file, kind, url: previewUrl.current });
     ref.current?.focus();
+  };
+
+  /** [chat] "typing…" for the customer, at most once per 20 s (the server throttles too). */
+  const pingTyping = () => {
+    const now = Date.now();
+    if (!windowOpen || now - lastTyping.current < TYPING_THROTTLE_MS) return;
+    lastTyping.current = now;
+    axios.post(`/api/conversations/${conversationId}/typing`).catch(() => {});
   };
 
   const sendMedia = async (a: Attachment) => {
@@ -676,11 +1024,27 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
       if (r.data?.message) onSent(r.data.message as Message);
       setText("");
       clearAttachment();
+      onCancelReply();
     } catch (e) {
       toast.error(err(e, "File not sent"));
     } finally {
       setSending(false);
       setProgress(null);
+      onDone();
+    }
+  };
+
+  /** Sends location / contacts / interactive through the messages route (with the reply quote). */
+  const sendRich = async (payload: Record<string, unknown>, label: string) => {
+    try {
+      const r = await axios.post(`/api/conversations/${conversationId}/messages`, { ...payload, replyToId: replyTo?.id });
+      if (r.data?.message) onSent(r.data.message as Message);
+      onCancelReply();
+      return true;
+    } catch (e) {
+      toast.error(err(e, `${label} not sent`));
+      return false;
+    } finally {
       onDone();
     }
   };
@@ -700,14 +1064,17 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
     const content = text.trim();
     if (!content || sending) return;
     setSending(true);
+    const quote = replyTo;
     const temp: Message = {
       id: `temp-${Date.now()}`, direction: "OUTBOUND", type: "TEXT", status: "PENDING", content, mediaType: null, mediaCaption: null,
       templateName: null, failureReason: null, isBotMessage: false, createdAt: new Date().toISOString(), sentByUser: null, pending: true,
+      interactive: quote?.wamid ? { context: { wamid: quote.wamid, messageId: quote.id, preview: messagePreview(quote), direction: quote.direction } } : undefined,
     };
     onSent(temp);
     setText("");
+    onCancelReply();
     try {
-      await axios.post(`/api/conversations/${conversationId}/messages`, { type: "text", content });
+      await axios.post(`/api/conversations/${conversationId}/messages`, { type: "text", content, replyToId: quote?.id });
     } catch (e) {
       toast.error(err(e, "Message not sent"));
       setText(content);
@@ -715,6 +1082,14 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
       setSending(false);
       onDone();
     }
+  };
+
+  const insertEmoji = (e: string) => {
+    const el = ref.current;
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? text.length;
+    setText((t) => t.slice(0, start) + e + t.slice(end));
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(start + e.length, start + e.length); });
   };
 
   const saveQuickReply = async () => {
@@ -728,6 +1103,26 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
       qc.invalidateQueries({ queryKey: ["inbox-meta"] });
     } catch (e) { toast.error(err(e)); }
   };
+
+  if (blocked || optedOut) {
+    return (
+      <div className="border-t border-slate-200 bg-white p-3 sm:p-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-red-200 bg-red-50 p-3">
+          <Icon name="block" className="w-5 h-5 text-red-600 shrink-0" />
+          <p className="flex-1 text-xs text-red-900">
+            {blocked
+              ? <><b>You blocked this contact.</b> Messages can&apos;t be sent until you unblock them. Their incoming messages still arrive here.</>
+              : <><b>This contact unsubscribed (STOP).</b> Nothing can be sent until they message START again.</>}
+          </p>
+          {blocked && (
+            <button onClick={onUnblock} className="shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl border border-red-200 bg-white px-3.5 py-2 text-xs font-semibold text-red-700 hover:bg-red-100">
+              Unblock
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!windowOpen) {
     return (
@@ -747,6 +1142,16 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
     );
   }
 
+  const attachItems: MenuItem[] = [
+    { id: "file", label: "Photo, video, audio or document", icon: "attach_file", onSelect: () => fileRef.current?.click() },
+    { id: "location", label: "Location", icon: "location_on", onSelect: () => setExtra("location") },
+    { id: "contact", label: "Contact card", icon: "contact_page", onSelect: () => setExtra("contact") },
+    { id: "button", label: "Reply buttons", icon: "touch_app", onSelect: () => setExtra("button") },
+    { id: "list", label: "List message", icon: "list", onSelect: () => setExtra("list") },
+    { id: "template", label: "Template", icon: "description", onSelect: () => setShowTemplates(true) },
+  ];
+  const showMic = voiceOk && !text.trim() && !attachment && !sending;
+
   return (
     <div className="relative border-t border-slate-200 bg-white px-2 sm:px-4 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
       {suggestions.length > 0 && (
@@ -760,6 +1165,18 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
             </li>
           ))}
         </ul>
+      )}
+      {replyTo && (
+        <div className="mb-2 flex items-start gap-2">
+          <div className="flex-1 min-w-0">
+            <QuotedBlock own={false} contactName={contactName}
+              ctx={{ wamid: replyTo.wamid ?? "", messageId: replyTo.id, preview: messagePreview(replyTo), direction: replyTo.direction }} />
+            {attachment && <p className="text-[10px] text-slate-400 px-1">Files from your device are sent without the quote.</p>}
+          </div>
+          <button onClick={onCancelReply} aria-label="Cancel reply" className="w-8 h-8 shrink-0 flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100">
+            <Icon name="close" className="w-4 h-4" />
+          </button>
+        </div>
       )}
       {attachment && (
         <div className="mb-2 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-2 pr-3">
@@ -775,6 +1192,7 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
           )}
           <div className="flex-1 min-w-0">
             <p className="text-xs font-semibold text-slate-800 truncate">{attachment.file.name}</p>
+            {attachment.kind === "audio" && attachment.url && !sending && <audio src={attachment.url} controls preload="metadata" className="mt-1 h-8 w-full max-w-xs" />}
             <p className="text-[10px] text-slate-500">
               {sending
                 ? progress !== null && progress < 100 ? `Uploading… ${progress}%` : "Sending to WhatsApp…"
@@ -792,15 +1210,23 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
         </div>
       )}
       <input ref={fileRef} type="file" accept={ACCEPT} className="hidden" onChange={(e) => pickFile(e.target.files?.[0])} />
-      <div className="flex items-end gap-2">
+      <div className="flex items-end gap-1 sm:gap-2">
         <div className="flex">
-          <button onClick={() => fileRef.current?.click()} disabled={disabled || sending} title="Attach a photo, video, audio or document (max 4 MB)" aria-label="Attach a file"
-            className="w-10 h-10 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-40">
-            <Icon name="attach_file" className="w-5 h-5" />
-          </button>
-          <button onClick={() => setShowTemplates(true)} title="Send a template" aria-label="Send a template" className="w-10 h-10 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100">
-            <Icon name="description" className="w-5 h-5" />
-          </button>
+          <div className="relative">
+            <button ref={emojiBtn} onClick={() => setEmojiOpen((o) => !o)} disabled={disabled || sending} aria-label="Emoji" aria-expanded={emojiOpen} title="Emoji"
+              className="w-10 h-10 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-40">
+              <Icon name="mood" className="w-5 h-5" />
+            </button>
+            {emojiOpen && <EmojiPicker triggerRef={emojiBtn} onClose={() => setEmojiOpen(false)} onPick={insertEmoji} className="absolute bottom-full left-0 mb-2" />}
+          </div>
+          <div className="relative">
+            <button ref={attachBtn} onClick={() => setAttachMenu((o) => !o)} disabled={disabled || sending} aria-label="Attach" aria-haspopup="menu" aria-expanded={attachMenu}
+              title="Attach a file, location, contact or interactive message"
+              className="w-10 h-10 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-40">
+              <Icon name="attach_file" className="w-5 h-5" />
+            </button>
+            <PopoverMenu open={attachMenu} onClose={() => setAttachMenu(false)} items={attachItems} label="Attach" triggerRef={attachBtn} align="left" placement="above" className="sm:w-64" />
+          </div>
           <button onClick={saveQuickReply} disabled={!text.trim()} title="Save as quick reply" aria-label="Save as quick reply" className="hidden sm:flex w-10 h-10 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-30">
             <Icon name="bolt" className="w-5 h-5" />
           </button>
@@ -808,8 +1234,9 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
         <textarea
           ref={ref}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => { setText(e.target.value); if (e.target.value.trim()) pingTyping(); }}
           onKeyDown={(e) => {
+            if (e.key === "Escape" && replyTo) { e.preventDefault(); onCancelReply(); return; }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               if (suggestions.length === 1) setText(suggestions[0].content);
@@ -822,19 +1249,27 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
           }}
           rows={1}
           disabled={disabled || (!!attachment && (attachment.kind === "audio" || sending))}
-          maxLength={attachment ? 1024 : undefined}
+          maxLength={attachment ? 1024 : 4096}
           placeholder={attachment ? (attachment.kind === "audio" ? "Audio is sent without a caption" : "Add a caption…") : meta?.quickReplies.length ? "Type a message… (/ for quick replies)" : "Type a message…"}
-          className="flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm leading-snug focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500 max-h-40"
+          className="flex-1 min-w-0 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm leading-snug focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500 max-h-40"
         />
-        <button onClick={send} disabled={(!text.trim() && !attachment) || sending || disabled} aria-label={attachment ? "Send file" : "Send message"}
-          className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full bg-[#25D366] text-white shadow-md shadow-green-500/30 hover:bg-[#1fb857] disabled:opacity-40 disabled:shadow-none transition">
-          {sending && attachment
-            ? <span className="w-5 h-5 rounded-full border-2 border-white border-t-transparent animate-spin" />
-            : <Icon name="send" filled className="w-5 h-5" />}
-        </button>
+        {showMic && <VoiceRecorderButton disabled={disabled} onRecorded={pickFile} />}
+        {!showMic && (
+          <button onClick={send} disabled={(!text.trim() && !attachment) || sending || disabled} aria-label={attachment ? "Send file" : "Send message"}
+            className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full bg-[#25D366] text-white shadow-md shadow-green-500/30 hover:bg-[#1fb857] disabled:opacity-40 disabled:shadow-none transition">
+            {sending && attachment
+              ? <span className="w-5 h-5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+              : <Icon name="send" filled className="w-5 h-5" />}
+          </button>
+        )}
       </div>
       <p className="hidden sm:block mt-1 px-1 text-[10px] text-slate-400">Enter to send · Shift + Enter for a new line · Files up to 4 MB</p>
       {showTemplates && <TemplatePicker conversationId={conversationId} templates={meta?.templates ?? []} onClose={() => setShowTemplates(false)} onDone={onDone} />}
+      {extra === "location" && <LocationDialog onClose={() => setExtra(null)} onSend={(location) => sendRich({ type: "location", location }, "Location")} />}
+      {extra === "contact" && <ContactCardDialog onClose={() => setExtra(null)} onSend={(contactIds) => sendRich({ type: "contacts", contactIds }, "Contact")} />}
+      {(extra === "button" || extra === "list") && (
+        <InteractiveDialog kind={extra} onClose={() => setExtra(null)} onSend={(interactive) => sendRich({ type: "interactive", interactive }, "Message")} />
+      )}
     </div>
   );
 }
