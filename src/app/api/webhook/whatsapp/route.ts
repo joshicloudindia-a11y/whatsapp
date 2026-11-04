@@ -1,89 +1,115 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { parseWebhookMessage, verifyWebhookSignature } from "@/lib/whatsapp";
 import { pusherServer, PUSHER_EVENTS, orgChannel, conversationChannel } from "@/lib/pusher";
 
-// Meta webhook verification
+export const dynamic = "force-dynamic";
+
+/**
+ * Step 2a – GET verification request.
+ * Meta sends hub.mode=subscribe, hub.verify_token and hub.challenge when the
+ * Callback URL is saved. Echo hub.challenge with 200 only if the token matches.
+ */
 export async function GET(req: NextRequest) {
   const mode      = req.nextUrl.searchParams.get("hub.mode");
   const token     = req.nextUrl.searchParams.get("hub.verify_token");
   const challenge = req.nextUrl.searchParams.get("hub.challenge");
+  const expected  = process.env.META_WEBHOOK_VERIFY_TOKEN;
 
-  if (mode === "subscribe" && token === process.env.META_WEBHOOK_VERIFY_TOKEN) {
-    return new NextResponse(challenge, { status: 200 });
+  if (!expected) {
+    console.error("[webhook] META_WEBHOOK_VERIFY_TOKEN is not set");
+    return new NextResponse("Server misconfigured", { status: 500 });
+  }
+
+  if (mode === "subscribe" && token === expected && challenge) {
+    return new NextResponse(challenge, {
+      status: 200,
+      headers: { "Content-Type": "text/plain" },
+    });
   }
   return new NextResponse("Forbidden", { status: 403 });
 }
 
-// Receive inbound messages & status updates
+/**
+ * Step 2b – POST event notifications.
+ * Validates X-Hub-Signature-256 with the App Secret, replies 200 immediately,
+ * and processes the payload after the response is sent.
+ */
 export async function POST(req: NextRequest) {
+  const rawBody   = await req.text();
+  const appSecret = process.env.META_APP_SECRET;
+
+  if (appSecret) {
+    const signature = req.headers.get("x-hub-signature-256") ?? "";
+    if (!verifyWebhookSignature(rawBody, signature, appSecret)) {
+      console.error("[webhook] X-Hub-Signature-256 mismatch");
+      return new NextResponse("Invalid signature", { status: 401 });
+    }
+  } else if (process.env.NODE_ENV === "production") {
+    console.error("[webhook] META_APP_SECRET is not set – rejecting unsigned payload");
+    return new NextResponse("Server misconfigured", { status: 500 });
+  } else {
+    console.warn("[webhook] META_APP_SECRET not set – skipping signature check (dev only)");
+  }
+
+  let body: any;
   try {
-    // Read raw body for signature verification
-    const rawBody = await req.text();
+    body = JSON.parse(rawBody);
+  } catch {
+    return new NextResponse("Invalid JSON", { status: 400 });
+  }
 
-    // Verify signature when app secret is configured
-    if (process.env.META_APP_SECRET) {
-      const signature = req.headers.get("x-hub-signature-256") ?? "";
-      const valid = verifyWebhookSignature(rawBody, signature, process.env.META_APP_SECRET);
-      if (!valid) {
-        console.error("Webhook signature mismatch");
-        return new NextResponse("Invalid signature", { status: 403 });
-      }
-    }
+  if (body?.object !== "whatsapp_business_account") {
+    return NextResponse.json({ status: "ignored" });
+  }
 
-    const body = JSON.parse(rawBody);
+  // Acknowledge promptly; Meta retries (and duplicates) if we are slow or non-200.
+  after(() => processPayload(body));
+  return NextResponse.json({ status: "ok" });
+}
 
-    if (body.object !== "whatsapp_business_account") {
-      return NextResponse.json({ status: "ignored" });
-    }
+async function processPayload(body: any) {
+  for (const entry of body.entry ?? []) {
+    for (const { messages, statuses, phoneNumberId, contacts } of parseWebhookMessage(entry)) {
+      try {
+        // Look up account by phoneNumberId (most precise), fall back to WABA ID
+        const waAccount = await prisma.whatsappAccount.findFirst({
+          where: phoneNumberId ? { phoneNumberId } : { wabaId: entry.id },
+        });
 
-    for (const entry of body.entry ?? []) {
-      const parsed = parseWebhookMessage(entry);
-      if (!parsed) continue;
+        if (!waAccount) {
+          console.warn(`[webhook] No WhatsApp account for phoneNumberId=${phoneNumberId} wabaId=${entry.id}`);
+          continue;
+        }
 
-      const { messages, statuses, phoneNumberId, contacts } = parsed;
-
-      // Look up account by phoneNumberId (most precise), fall back to WABA ID
-      const waAccount = await prisma.whatsappAccount.findFirst({
-        where: phoneNumberId
-          ? { phoneNumberId }
-          : { wabaId: entry.id },
-      });
-
-      if (!waAccount) {
-        console.warn(`No WhatsApp account found for phoneNumberId=${phoneNumberId} wabaId=${entry.id}`);
-        continue;
-      }
-
-      if (messages?.length) {
-        for (const msg of messages) {
+        for (const msg of messages ?? []) {
           try {
-            await handleInboundMessage(msg, waAccount, contacts);
+            await handleInboundMessage(msg, waAccount, contacts ?? []);
           } catch (err) {
-            console.error("Failed to handle message:", msg.id, err);
+            console.error("[webhook] Failed to handle message:", msg?.id, err);
           }
         }
-      }
 
-      if (statuses?.length) {
-        for (const status of statuses) {
+        for (const status of statuses ?? []) {
           try {
             await handleStatusUpdate(status, waAccount.organizationId);
           } catch (err) {
-            console.error("Failed to handle status update:", status.id, err);
+            console.error("[webhook] Failed to handle status update:", status?.id, err);
           }
         }
+      } catch (err) {
+        console.error("[webhook] Failed to process change:", err);
       }
     }
-
-    return NextResponse.json({ status: "ok" });
-  } catch (error) {
-    console.error("Webhook error:", error);
-    return NextResponse.json({ status: "error" }, { status: 500 });
   }
 }
 
 async function handleInboundMessage(msg: any, waAccount: any, contacts: any[]) {
+  // Meta may deliver the same event more than once – wamid is unique.
+  if (msg.id && (await prisma.message.findUnique({ where: { wamid: msg.id }, select: { id: true } }))) {
+    return;
+  }
+
   const phone       = msg.from;
   const contactInfo = contacts?.find((c: any) => c.wa_id === phone);
   const contactName = contactInfo?.profile?.name;

@@ -1,4 +1,8 @@
-const META_API_BASE = "https://graph.facebook.com/v19.0";
+import crypto from "crypto";
+
+// v19.0 is deprecated by Meta. Override with META_GRAPH_API_VERSION if needed.
+const META_GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || "v24.0";
+const META_API_BASE = `https://graph.facebook.com/${META_GRAPH_API_VERSION}`;
 
 export interface SendTextPayload {
   to: string;
@@ -150,23 +154,41 @@ export async function getTemplateStatus(templateId: string, accessToken: string)
   return res.json();
 }
 
+/**
+ * Validates Meta's X-Hub-Signature-256 header (HMAC-SHA256 of the raw body using the App Secret).
+ * Uses a constant-time comparison to avoid timing attacks.
+ */
 export function verifyWebhookSignature(body: string, signature: string, secret: string): boolean {
-  const crypto = require("crypto");
-  const expected = crypto.createHmac("sha256", secret).update(body).digest("hex");
-  return `sha256=${expected}` === signature;
+  if (!signature?.startsWith("sha256=") || !secret) return false;
+  const expected = Buffer.from(
+    "sha256=" + crypto.createHmac("sha256", secret).update(body, "utf8").digest("hex"),
+    "utf8"
+  );
+  const received = Buffer.from(signature, "utf8");
+  if (expected.length !== received.length) return false;
+  return crypto.timingSafeEqual(expected, received);
 }
 
-export function parseWebhookMessage(entry: any) {
-  try {
-    const changes = entry.changes?.[0]?.value;
-    if (!changes) return null;
+export interface ParsedWebhookChange {
+  messages?: any[];
+  statuses?: any[];
+  phoneNumberId?: string;
+  contacts?: any[];
+}
 
-    const messages = changes.messages;
-    const statuses = changes.statuses;
-    const phoneNumberId = changes.metadata?.phone_number_id;
-
-    return { messages, statuses, phoneNumberId, contacts: changes.contacts };
-  } catch {
-    return null;
+/** Returns every "messages" change in an entry (Meta can batch several per entry). */
+export function parseWebhookMessage(entry: any): ParsedWebhookChange[] {
+  const result: ParsedWebhookChange[] = [];
+  for (const change of entry?.changes ?? []) {
+    if (change?.field && change.field !== "messages") continue;
+    const value = change?.value;
+    if (!value) continue;
+    result.push({
+      messages: value.messages,
+      statuses: value.statuses,
+      phoneNumberId: value.metadata?.phone_number_id,
+      contacts: value.contacts,
+    });
   }
+  return result;
 }
