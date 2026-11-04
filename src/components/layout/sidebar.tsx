@@ -33,6 +33,7 @@ const NAV: { label: string; items: NavItem[] }[] = [
       { href: "/templates",  icon: "description", label: "Templates",  short: "Templates", adminOnly: false },
       { href: "/chatbots",   icon: "smart_toy",   label: "Chatbots",   short: "Bots",      adminOnly: false },
       { href: "/automation", icon: "bolt",        label: "Automation", short: "Automate",  adminOnly: false },
+      { href: "/growth",     icon: "rocket_launch", label: "Growth tools", short: "Growth",  adminOnly: false },
     ],
   },
   {

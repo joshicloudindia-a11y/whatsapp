@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { Icon } from "@/components/ui/icon";
 import { OnboardingChecklist } from "@/components/dashboard/onboarding-checklist";
+import { WhatsappHealthBanner } from "@/components/dashboard/whatsapp-health-banner";
 import { timeAgo, getInitials, cn } from "@/lib/utils";
 
 type Range = "7d" | "30d" | "90d";
@@ -75,6 +76,7 @@ function CardHeader({ title, subtitle, href, linkLabel = "View all" }: { title: 
 // ─── Trial / plan banner ─────────────────────────────────────────────────────
 function PlanBanner() {
   const [dismissed, setDismissed] = useState(false);
+  const [openedAt] = useState(() => Date.now());
   const { data: sub } = useQuery({
     queryKey: ["my-subscription"],
     queryFn: () => axios.get("/api/settings/subscription").then((r) => r.data),
@@ -90,7 +92,7 @@ function PlanBanner() {
   if (!(sub.status === "TRIAL" || sub.plan === "TRIAL")) return null;
 
   const trialEndsAt = sub.trialEndsAt ? new Date(sub.trialEndsAt) : null;
-  const daysLeft = trialEndsAt ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / 86400000)) : null;
+  const daysLeft = trialEndsAt ? Math.max(0, Math.ceil((trialEndsAt.getTime() - openedAt) / 86400000)) : null;
   const plans: Plan[] = plansData?.plans ?? [];
 
   return (
@@ -235,6 +237,8 @@ export default function DashboardPage() {
           </div>
         </div>
       </section>
+
+      <WhatsappHealthBanner />
 
       <PlanBanner />
 

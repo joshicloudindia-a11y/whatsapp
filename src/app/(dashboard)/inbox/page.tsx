@@ -24,7 +24,7 @@ interface ListConversation {
   messages: { content: string | null; type: string; direction: "INBOUND" | "OUTBOUND"; status: string; createdAt: string }[];
 }
 interface Message {
-  id: string; direction: "INBOUND" | "OUTBOUND"; type: string; status: string; content: string | null; mediaType: string | null;
+  id: string; direction: "INBOUND" | "OUTBOUND"; type: string; status: string; content: string | null; mediaType: string | null; mediaUrl?: string | null;
   mediaCaption: string | null; templateName: string | null; failureReason: string | null; isBotMessage: boolean; createdAt: string;
   sentByUser: { id: string; name: string | null } | null; pending?: boolean;
 }
@@ -32,6 +32,7 @@ interface Detail {
   id: string; status: Status; isRead: boolean; createdAt: string; sessionExpiresAt: string | null; lastMessageAt: string | null;
   contact: { id: string; name: string | null; phone: string; email: string | null; stage: string; createdAt: string; notes: string | null; tags: { tag: string }[]; _count: { conversations: number } };
   assignedAgent: { id: string; name: string | null; email: string } | null;
+  assignedTeam: { id: string; name: string } | null;
   labels: { label: { id: string; name: string; color: string } }[];
   whatsappAccount: { displayName: string; phoneNumber: string; isActive: boolean };
   notes: { id: string; content: string; createdAt: string; authorId: string | null; author: { name: string | null; email: string } | null }[];
@@ -80,7 +81,7 @@ function Avatar({ name, size = "md" }: { name: string; size?: "sm" | "md" | "lg"
 function preview(m?: ListConversation["messages"][number]) {
   if (!m) return "No messages yet";
   if (m.content) return m.content;
-  const map: Record<string, string> = { IMAGE: "📷 Photo", VIDEO: "🎥 Video", AUDIO: "🎤 Voice message", DOCUMENT: "📄 Document", LOCATION: "📍 Location", TEMPLATE: "Template message" };
+  const map: Record<string, string> = { IMAGE: "Photo", VIDEO: "Video", AUDIO: "Voice message", DOCUMENT: "Document", STICKER: "Sticker", LOCATION: "Location", TEMPLATE: "Template message" };
   return map[m.type] ?? `[${m.type.toLowerCase()}]`;
 }
 
@@ -414,37 +415,215 @@ function ChatArea({ conversationId, meta, onBack }: { conversationId: string; me
 function Bubble({ m, grouped }: { m: Message; grouped: boolean }) {
   const own = m.direction === "OUTBOUND";
   const time = new Date(m.createdAt).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
-  const mediaIcon: Record<string, string> = { IMAGE: "image", VIDEO: "videocam", AUDIO: "mic", DOCUMENT: "description", LOCATION: "location_on" };
+  const isMedia = MEDIA_KINDS.includes(m.type);
   let coords: { lat: number; lng: number } | null = null;
   if (m.type === "LOCATION" && m.content) {
     try { coords = JSON.parse(m.content); } catch { coords = null; }
   }
   const body: React.ReactNode = coords
     ? <a className="underline" target="_blank" rel="noreferrer" href={`https://maps.google.com/?q=${coords.lat},${coords.lng}`}>Open location in Maps</a>
+    : m.type === "DOCUMENT" ? null // the filename is shown on the file card
     : m.content;
+  const caption = m.mediaCaption && m.mediaCaption !== m.content ? m.mediaCaption : null;
   return (
     <div className={cn("flex", own ? "justify-end" : "justify-start", grouped ? "mt-0.5" : "mt-2")}>
-      <div className={cn("relative max-w-[85%] sm:max-w-[70%] rounded-2xl px-3 py-2 shadow-sm",
+      <div className={cn("relative max-w-[85%] sm:max-w-[70%] min-w-0 rounded-2xl shadow-sm", isMedia && m.type !== "AUDIO" && m.type !== "DOCUMENT" ? "p-1 pb-1.5" : "px-3 py-2",
         own ? "bg-[#d9fdd3] text-slate-900" : "bg-white text-slate-900", !grouped && (own ? "rounded-tr-sm" : "rounded-tl-sm"), m.pending && "opacity-70")}>
         {own && !grouped && (m.sentByUser?.name || m.isBotMessage) && (
-          <p className="text-[10px] font-semibold text-green-700 mb-0.5">{m.isBotMessage ? "Chatbot" : m.sentByUser?.name}</p>
+          <p className={cn("text-[10px] font-semibold text-green-700 mb-0.5", isMedia && "px-2 pt-1")}>{m.isBotMessage ? "Chatbot" : m.sentByUser?.name}</p>
         )}
-        {m.type !== "TEXT" && m.type !== "TEMPLATE" && mediaIcon[m.type] && (
-          <div className="mb-1 flex items-center gap-2 rounded-lg bg-black/5 px-2.5 py-2 text-xs text-slate-600">
-            <Icon name={mediaIcon[m.type]} className="w-4 h-4" /> {m.type.charAt(0) + m.type.slice(1).toLowerCase()}
-          </div>
-        )}
+        {isMedia && <MediaContent m={m} />}
         {m.type === "TEMPLATE" && <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-0.5">Template · {m.templateName}</p>}
-        {body && <p className="text-[14px] leading-snug whitespace-pre-wrap break-words">{body}</p>}
-        {m.mediaCaption && <p className="text-[13px] text-slate-700 mt-1 whitespace-pre-wrap">{m.mediaCaption}</p>}
-        <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] text-slate-400">
+        <div className={cn(isMedia && m.type !== "AUDIO" && m.type !== "DOCUMENT" && "px-2")}>
+          {body && <p className={cn("text-[14px] leading-snug whitespace-pre-wrap break-words", isMedia && "mt-1")}>{body}</p>}
+          {caption && <p className="text-[13px] text-slate-700 mt-1 whitespace-pre-wrap break-words">{caption}</p>}
+        </div>
+        <div className={cn("mt-0.5 flex items-center justify-end gap-1 text-[10px] text-slate-400", isMedia && m.type !== "AUDIO" && m.type !== "DOCUMENT" && "px-2")}>
           {time}
           {own && <Ticks status={m.pending ? "PENDING" : m.status} />}
         </div>
-        {m.status === "FAILED" && m.failureReason && <p className="mt-1 text-[11px] text-red-600">Failed: {m.failureReason}</p>}
+        {m.status === "FAILED" && m.failureReason && <p className={cn("mt-1 text-[11px] text-red-600", isMedia && "px-2")}>Failed: {m.failureReason}</p>}
       </div>
     </div>
   );
+}
+
+// ─── Media ───────────────────────────────────────────────────────────────────
+const MEDIA_KINDS = ["IMAGE", "VIDEO", "AUDIO", "DOCUMENT", "STICKER"];
+const MEDIA_LABEL: Record<string, string> = { IMAGE: "Photo", VIDEO: "Video", AUDIO: "Voice message", DOCUMENT: "Document", STICKER: "Sticker" };
+const MEDIA_ICON: Record<string, string> = { IMAGE: "image", VIDEO: "videocam", AUDIO: "mic", DOCUMENT: "description", STICKER: "image" };
+
+/** Mounts children only once the placeholder scrolls near the viewport. */
+function useInView<T extends Element>() {
+  const ref = useRef<T>(null);
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || seen) return;
+    if (typeof IntersectionObserver === "undefined") { const t = setTimeout(() => setSeen(true), 0); return () => clearTimeout(t); }
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) { setSeen(true); io.disconnect(); }
+    }, { rootMargin: "300px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [seen]);
+  return [ref, seen] as const;
+}
+
+function fileExt(name?: string | null) {
+  const e = name?.split(".").pop();
+  return e && e !== name && e.length <= 5 ? e.toUpperCase() : null;
+}
+
+function MediaError({ label, onRetry }: { label: string; onRetry: () => void }) {
+  return (
+    <div className="flex items-center gap-2 rounded-xl bg-black/5 px-3 py-3 text-xs text-slate-600 w-64 max-w-full">
+      <Icon name="error" className="w-4 h-4 text-slate-400 shrink-0" />
+      <span className="flex-1 min-w-0">{label} unavailable. It may have expired on WhatsApp.</span>
+      <button onClick={onRetry} aria-label="Retry loading media" className="w-7 h-7 shrink-0 flex items-center justify-center rounded-lg hover:bg-black/5">
+        <Icon name="refresh" className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
+function MediaContent({ m }: { m: Message }) {
+  const [ref, inView] = useInView<HTMLDivElement>();
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [attempt, setAttempt] = useState(0);
+  const [lightbox, setLightbox] = useState(false);
+  const label = MEDIA_LABEL[m.type] ?? "Media";
+
+  if (!m.mediaUrl || m.pending || m.id.startsWith("temp-")) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl bg-black/5 px-3 py-2.5 text-xs text-slate-600">
+        <Icon name={MEDIA_ICON[m.type] ?? "description"} className="w-4 h-4" /> {label}
+      </div>
+    );
+  }
+
+  const src = `/api/media/${encodeURIComponent(m.id)}${attempt ? `?r=${attempt}` : ""}`;
+  const download = `/api/media/${encodeURIComponent(m.id)}?download=1`;
+  const retry = () => { setState("loading"); setAttempt((a) => a + 1); };
+
+  if (m.type === "DOCUMENT") {
+    const name = m.content || "Document";
+    const ext = fileExt(m.content) ?? (m.mediaType?.includes("/") ? m.mediaType.split("/")[1].split(".").pop()?.toUpperCase().slice(0, 5) : null) ?? "FILE";
+    return (
+      <div className="flex items-center gap-3 rounded-xl bg-black/5 p-2.5 w-64 max-w-full">
+        <span className="w-10 h-10 shrink-0 rounded-lg bg-white flex flex-col items-center justify-center text-red-500 shadow-sm">
+          <Icon name="description" className="w-5 h-5" />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] font-semibold text-slate-800 truncate" title={name}>{name}</p>
+          <p className="text-[10px] text-slate-500">{ext}</p>
+        </div>
+        <a href={download} download={name} aria-label={`Download ${name}`} title="Download"
+          className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full border border-slate-300 text-slate-600 hover:bg-white">
+          <Icon name="download" className="w-4 h-4" />
+        </a>
+      </div>
+    );
+  }
+
+  if (state === "error") return <MediaError label={label} onRetry={retry} />;
+
+  if (m.type === "AUDIO") {
+    return (
+      <div ref={ref} className="w-64 max-w-full">
+        {inView ? (
+          <audio key={attempt} controls preload="metadata" src={src} onError={() => setState("error")} className="w-full h-10" />
+        ) : <div className="h-10 rounded-full bg-black/5 animate-pulse" />}
+      </div>
+    );
+  }
+
+  if (m.type === "VIDEO") {
+    return (
+      <div ref={ref} className="relative w-64 sm:w-72 max-w-full overflow-hidden rounded-xl bg-black/80">
+        {inView && (
+          <video key={attempt} controls playsInline preload="metadata" src={src}
+            onLoadedMetadata={() => setState("ready")} onError={() => setState("error")}
+            className={cn("block w-full max-h-80", state !== "ready" && "h-40")} />
+        )}
+        {state === "loading" && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-200 animate-pulse">
+            <Icon name="videocam" className="w-8 h-8 text-slate-400" />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // IMAGE / STICKER
+  const sticker = m.type === "STICKER";
+  return (
+    <>
+      <div ref={ref} className={cn("relative overflow-hidden", sticker ? "w-32 h-32" : "w-64 sm:w-72 max-w-full rounded-xl", state !== "ready" && !sticker && "h-48")}>
+        {inView && (
+          // eslint-disable-next-line @next/next/no-img-element -- authenticated proxy; next/image can't forward cookies
+          <img key={attempt} src={src} alt={m.mediaCaption || m.content || label} loading="lazy" decoding="async"
+            onLoad={() => setState("ready")} onError={() => setState("error")}
+            onClick={() => !sticker && state === "ready" && setLightbox(true)}
+            className={cn(sticker ? "w-full h-full object-contain" : "block w-full max-h-80 object-cover cursor-zoom-in", state !== "ready" && "opacity-0")} />
+        )}
+        {state === "loading" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-200/80 animate-pulse rounded-xl">
+            <Icon name="image" className="w-8 h-8 text-slate-400" />
+          </div>
+        )}
+      </div>
+      {lightbox && <Lightbox src={src} download={download} alt={m.mediaCaption || m.content || label} onClose={() => setLightbox(false)} />}
+    </>
+  );
+}
+
+function Lightbox({ src, download, alt, onClose }: { src: string; download: string; alt: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-[70] flex flex-col bg-slate-950/95 admin-fade" role="dialog" aria-modal="true" aria-label="Image preview" onClick={onClose}>
+      <div className="flex items-center justify-end gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))]" onClick={(e) => e.stopPropagation()}>
+        <a href={download} download className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3.5 py-2 text-xs font-semibold text-white hover:bg-white/20">
+          <Icon name="download" className="w-4 h-4" /> Download
+        </a>
+        <button onClick={onClose} aria-label="Close preview" className="w-9 h-9 flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20">
+          <Icon name="close" className="w-5 h-5" />
+        </button>
+      </div>
+      <div className="flex-1 min-h-0 flex items-center justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        {/* eslint-disable-next-line @next/next/no-img-element -- authenticated proxy */}
+        <img src={src} alt={alt} onClick={(e) => e.stopPropagation()} className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" />
+      </div>
+    </div>
+  );
+}
+
+type AttachmentKind = "image" | "video" | "audio" | "document";
+interface Attachment { file: File; kind: AttachmentKind; url: string | null }
+// Request bodies are capped by the host (Vercel: 4.5 MB), so uploads stop at 4 MB.
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+const ATTACH_TYPES: Record<string, AttachmentKind> = {
+  "image/jpeg": "image", "image/png": "image", "video/mp4": "video", "video/3gpp": "video",
+  "audio/ogg": "audio", "audio/mpeg": "audio", "audio/aac": "audio", "audio/amr": "audio", "audio/mp4": "audio",
+  "application/pdf": "document", "text/plain": "document", "application/msword": "document",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "document",
+  "application/vnd.ms-excel": "document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "document",
+  "application/vnd.ms-powerpoint": "document", "application/vnd.openxmlformats-officedocument.presentationml.presentation": "document",
+};
+const ATTACH_EXT: Record<string, AttachmentKind> = {
+  jpg: "image", jpeg: "image", png: "image", mp4: "video", "3gp": "video", ogg: "audio", opus: "audio", mp3: "audio", aac: "audio", amr: "audio", m4a: "audio",
+  pdf: "document", txt: "document", doc: "document", docx: "document", xls: "document", xlsx: "document", ppt: "document", pptx: "document",
+};
+const ACCEPT = [...Object.keys(ATTACH_TYPES), ...Object.keys(ATTACH_EXT).map((e) => `.${e}`)].join(",");
+function attachmentKind(f: File): AttachmentKind | null {
+  return ATTACH_TYPES[f.type.split(";")[0]] ?? ATTACH_EXT[f.name.split(".").pop()?.toLowerCase() ?? ""] ?? null;
+}
+function formatBytes(n: number) {
+  return n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 // ─── Composer ────────────────────────────────────────────────────────────────
@@ -455,7 +634,56 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [attachment, setAttachment] = useState<Attachment | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const previewUrl = useRef<string | null>(null);
+
+  // Release the local preview URL when the composer goes away.
+  useEffect(() => () => { if (previewUrl.current) URL.revokeObjectURL(previewUrl.current); }, []);
+
+  const clearAttachment = () => {
+    if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+    previewUrl.current = null;
+    setAttachment(null);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const pickFile = (file: File | undefined | null) => {
+    if (!file) return;
+    const kind = attachmentKind(file);
+    if (!kind) { toast.error("Unsupported file. Send JPG/PNG, MP4, OGG/MP3/AAC/AMR audio, or PDF/Office/TXT documents."); return; }
+    if (file.size > MAX_UPLOAD_BYTES) { toast.error(`"${file.name}" is ${formatBytes(file.size)}. Files must be 4 MB or smaller.`); return; }
+    if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+    previewUrl.current = kind === "image" || kind === "video" ? URL.createObjectURL(file) : null;
+    setAttachment({ file, kind, url: previewUrl.current });
+    ref.current?.focus();
+  };
+
+  const sendMedia = async (a: Attachment) => {
+    if (sending) return;
+    setSending(true);
+    setProgress(0);
+    const caption = a.kind === "audio" ? "" : text.trim();
+    const form = new FormData();
+    form.append("file", a.file, a.file.name);
+    if (caption) form.append("caption", caption);
+    try {
+      const r = await axios.post(`/api/conversations/${conversationId}/media`, form, {
+        onUploadProgress: (ev) => setProgress(ev.total ? Math.round((ev.loaded / ev.total) * 100) : null),
+      });
+      if (r.data?.message) onSent(r.data.message as Message);
+      setText("");
+      clearAttachment();
+    } catch (e) {
+      toast.error(err(e, "File not sent"));
+    } finally {
+      setSending(false);
+      setProgress(null);
+      onDone();
+    }
+  };
 
   useEffect(() => {
     const el = ref.current;
@@ -468,6 +696,7 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
   const suggestions = slash !== null ? (meta?.quickReplies ?? []).filter((q) => q.shortcut.startsWith(slash)).slice(0, 6) : [];
 
   const send = async () => {
+    if (attachment) return sendMedia(attachment);
     const content = text.trim();
     if (!content || sending) return;
     setSending(true);
@@ -532,8 +761,43 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
           ))}
         </ul>
       )}
+      {attachment && (
+        <div className="mb-2 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-2 pr-3">
+          {attachment.kind === "image" && attachment.url ? (
+            // eslint-disable-next-line @next/next/no-img-element -- local object URL preview
+            <img src={attachment.url} alt="" className="w-12 h-12 rounded-xl object-cover shrink-0" />
+          ) : attachment.kind === "video" && attachment.url ? (
+            <video src={attachment.url} muted preload="metadata" className="w-12 h-12 rounded-xl object-cover shrink-0 bg-black" />
+          ) : (
+            <span className="w-12 h-12 rounded-xl bg-white flex items-center justify-center shrink-0 shadow-sm">
+              <Icon name={attachment.kind === "audio" ? "mic" : "description"} className="w-6 h-6 text-slate-500" />
+            </span>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-slate-800 truncate">{attachment.file.name}</p>
+            <p className="text-[10px] text-slate-500">
+              {sending
+                ? progress !== null && progress < 100 ? `Uploading… ${progress}%` : "Sending to WhatsApp…"
+                : `${formatBytes(attachment.file.size)} · ${attachment.kind === "audio" ? "audio can't have a caption" : "add an optional caption below"}`}
+            </p>
+            {sending && (
+              <div className="mt-1 h-1 rounded-full bg-slate-200 overflow-hidden">
+                <div className={cn("h-full bg-[#25D366] transition-all", (progress === null || progress >= 100) && "animate-pulse")} style={{ width: `${progress === null || progress >= 100 ? 100 : progress}%` }} />
+              </div>
+            )}
+          </div>
+          <button onClick={clearAttachment} disabled={sending} aria-label="Remove attachment" className="w-8 h-8 shrink-0 flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-200 disabled:opacity-40">
+            <Icon name="close" className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+      <input ref={fileRef} type="file" accept={ACCEPT} className="hidden" onChange={(e) => pickFile(e.target.files?.[0])} />
       <div className="flex items-end gap-2">
         <div className="flex">
+          <button onClick={() => fileRef.current?.click()} disabled={disabled || sending} title="Attach a photo, video, audio or document (max 4 MB)" aria-label="Attach a file"
+            className="w-10 h-10 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-40">
+            <Icon name="attach_file" className="w-5 h-5" />
+          </button>
           <button onClick={() => setShowTemplates(true)} title="Send a template" aria-label="Send a template" className="w-10 h-10 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100">
             <Icon name="description" className="w-5 h-5" />
           </button>
@@ -552,17 +816,24 @@ function Composer({ conversationId, windowOpen, meta, disabled, onSent, onDone }
               else send();
             }
           }}
+          onPaste={(e) => {
+            const f = e.clipboardData.files?.[0];
+            if (f) { e.preventDefault(); pickFile(f); }
+          }}
           rows={1}
-          disabled={disabled}
-          placeholder={meta?.quickReplies.length ? "Type a message… (/ for quick replies)" : "Type a message…"}
+          disabled={disabled || (!!attachment && (attachment.kind === "audio" || sending))}
+          maxLength={attachment ? 1024 : undefined}
+          placeholder={attachment ? (attachment.kind === "audio" ? "Audio is sent without a caption" : "Add a caption…") : meta?.quickReplies.length ? "Type a message… (/ for quick replies)" : "Type a message…"}
           className="flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm leading-snug focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500 max-h-40"
         />
-        <button onClick={send} disabled={!text.trim() || sending || disabled} aria-label="Send message"
+        <button onClick={send} disabled={(!text.trim() && !attachment) || sending || disabled} aria-label={attachment ? "Send file" : "Send message"}
           className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full bg-[#25D366] text-white shadow-md shadow-green-500/30 hover:bg-[#1fb857] disabled:opacity-40 disabled:shadow-none transition">
-          <Icon name="send" filled className="w-5 h-5" />
+          {sending && attachment
+            ? <span className="w-5 h-5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+            : <Icon name="send" filled className="w-5 h-5" />}
         </button>
       </div>
-      <p className="hidden sm:block mt-1 px-1 text-[10px] text-slate-400">Enter to send · Shift + Enter for a new line</p>
+      <p className="hidden sm:block mt-1 px-1 text-[10px] text-slate-400">Enter to send · Shift + Enter for a new line · Files up to 4 MB</p>
       {showTemplates && <TemplatePicker conversationId={conversationId} templates={meta?.templates ?? []} onClose={() => setShowTemplates(false)} onDone={onDone} />}
     </div>
   );
@@ -660,6 +931,18 @@ function InfoPanel({ detail, meta, onClose, onChanged, onAssign, onStatus }: {
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const labelIds = detail.labels.map((l) => l.label.id);
+  const { data: teams } = useQuery({
+    queryKey: ["teams"],
+    queryFn: () => axios.get("/api/settings/teams").then((r) => r.data.teams as { id: string; name: string }[]),
+    staleTime: 60_000,
+  });
+  const setTeam = async (teamId: string) => {
+    try {
+      await axios.post(`/api/conversations/${detail.id}/team`, { teamId: teamId || null });
+      toast.success(teamId ? `Moved to ${teams?.find((t) => t.id === teamId)?.name ?? "team"}` : "Team removed");
+      onChanged();
+    } catch (e) { toast.error(err(e, "Couldn't change team")); }
+  };
 
   const toggleLabel = async (id: string) => {
     const next = labelIds.includes(id) ? labelIds.filter((x) => x !== id) : [...labelIds, id];
@@ -717,6 +1000,13 @@ function InfoPanel({ detail, meta, onClose, onChanged, onAssign, onStatus }: {
             <option value="">Unassigned</option>
             {meta?.members.map((m) => <option key={m.id} value={m.id}>{m.name ?? m.email}{m.id === meta.me.userId ? " (me)" : ""}</option>)}
           </select>
+          {!!teams?.length && (
+            <select value={detail.assignedTeam?.id ?? ""} onChange={(e) => setTeam(e.target.value)} aria-label="Assign team"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30">
+              <option value="">No team</option>
+              {teams.map((t) => <option key={t.id} value={t.id}>Team: {t.name}</option>)}
+            </select>
+          )}
           <div className="grid grid-cols-3 gap-1.5">
             {(["OPEN", "PENDING", "RESOLVED"] as Status[]).map((s) => (
               <button key={s} onClick={() => s !== detail.status && onStatus(s)}

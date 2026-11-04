@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
+import { emitConversationResolved } from "@/lib/outgoing-webhooks";
 import type { ConversationStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireOrgMember } from "@/lib/org-auth";
@@ -17,6 +18,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     include: {
       contact: { include: { tags: { select: { tag: true } }, _count: { select: { conversations: true } } } },
       assignedAgent: { select: { id: true, name: true, email: true } },
+      assignedTeam: { select: { id: true, name: true } },
       labels: { include: { label: true } },
       whatsappAccount: { select: { id: true, displayName: true, phoneNumber: true, isActive: true } },
       notes: { orderBy: { createdAt: "desc" }, take: 50 },
@@ -63,6 +65,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   const updated = Object.keys(data).length ? await prisma.conversation.update({ where: { id }, data, select: { id: true, isRead: true, status: true } }) : null;
+  if (data.status === "RESOLVED") after(() => emitConversationResolved(id, member.userId)); // [webhooks]
 
   // Blue ticks for the customer: mark their latest message read on WhatsApp (best effort).
   if (body.isRead === true && !conv.isRead) {

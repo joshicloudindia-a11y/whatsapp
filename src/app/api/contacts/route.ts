@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
+import { emitContactCreated } from "@/lib/outgoing-webhooks";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireOrgMember } from "@/lib/org-auth";
@@ -63,6 +64,7 @@ export async function POST(req: NextRequest) {
       },
       select: contactListSelect,
     });
+    after(() => emitContactCreated(contact.id)); // [webhooks]
     return NextResponse.json({ contact }, { status: 201 });
   } catch (e) {
     if (apiError(e) === "P2002") return NextResponse.json({ error: `A contact with +${p.phone} already exists` }, { status: 409 });

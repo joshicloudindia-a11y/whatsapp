@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-const PUBLIC_PATHS = ["/", "/login", "/register", "/forgot-password", "/reset-password", "/verify-email", "/admin/login", "/accept-invite"];
-const PUBLIC_API  = ["/api/auth", "/api/webhook", "/api/plans", "/api/billing/webhook", "/api/admin-auth", "/api/cron"];
+const PUBLIC_PATHS = ["/", "/widget.js", "/login", "/register", "/forgot-password", "/reset-password", "/verify-email", "/admin/login", "/accept-invite"];
+const PUBLIC_API  = ["/api/auth", "/api/v1", "/api/webhook", "/api/plans", "/api/billing/webhook", "/api/admin-auth", "/api/cron"];
 
 const isAdminPath = (p: string) => p === "/admin" || p.startsWith("/admin/") || p.startsWith("/api/admin");
 

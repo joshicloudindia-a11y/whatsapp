@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { parseWebhookMessage, verifyWebhookSignature } from "@/lib/whatsapp";
+import { parseWebhookMessage, verifyWebhookSignature, sendTextMessage } from "@/lib/whatsapp";
 import { pusherServer, PUSHER_EVENTS, orgChannel, conversationChannel } from "@/lib/pusher";
 import { applyRecipientStatus } from "@/lib/broadcast-runner";
+import { emitContactCreated, emitMessageReceived, emitMessageStatus } from "@/lib/outgoing-webhooks"; // [webhooks]
 import { runChatbotForInbound } from "@/lib/chatbot-runtime"; // [chatbot]
 import { runInboundAutomations } from "@/lib/automation-runtime"; // [automation]
 
@@ -117,6 +118,10 @@ async function handleInboundMessage(msg: any, waAccount: any, contacts: any[]) {
   const contactInfo = contacts?.find((c: any) => c.wa_id === phone);
   const contactName = contactInfo?.profile?.name;
 
+  const contactIsNew = !(await prisma.contact.findUnique({
+    where: { organizationId_phone: { organizationId: waAccount.organizationId, phone } },
+    select: { id: true },
+  })); // [webhooks]
   const contact = await prisma.contact.upsert({
     where: { organizationId_phone: { organizationId: waAccount.organizationId, phone } },
     create: { organizationId: waAccount.organizationId, phone, name: contactName },
@@ -166,6 +171,9 @@ async function handleInboundMessage(msg: any, waAccount: any, contacts: any[]) {
       mediaType,
     },
   });
+  // [webhooks] Notify the org's outgoing webhooks (never throws).
+  after(() => emitMessageReceived(message.id));
+  if (contactIsNew) after(() => emitContactCreated(contact.id));
 
   await prisma.conversation.update({
     where: { id: conversation.id },
@@ -191,11 +199,72 @@ async function handleInboundMessage(msg: any, waAccount: any, contacts: any[]) {
     data: { organizationId: waAccount.organizationId, type: "MESSAGE_RECEIVED" },
   });
 
+  // [compliance] STOP / START keywords: update opt-out, confirm once, and skip bots/automations. Never throws.
+  if (await handleOptKeyword(msg, waAccount, contact, conversation.id)) return;
+
   // [chatbot] Run any active chatbot flow for this message (src/lib/chatbot-runtime.ts). Never throws.
   await runChatbotForInbound({ msg, waAccount, contactId: contact.id, conversationId: conversation.id });
 
   // [automation] Rule-based automations. Keep this AFTER any chatbot call: bots answer keywords first, automations skip their text reply if a bot already replied. Never throws.
   await runInboundAutomations({ organizationId: waAccount.organizationId, whatsappAccount: waAccount, contactId: contact.id, conversationId: conversation.id, messageId: message.id, text: content });
+}
+
+// [compliance] Whole-message keywords (trimmed, case-insensitive).
+const OPT_OUT_KEYWORDS = new Set(["stop", "unsubscribe", "stop all", "cancel", "opt out", "optout", "band karo"]);
+const OPT_IN_KEYWORDS = new Set(["start", "subscribe", "unstop", "opt in"]);
+const OPT_OUT_REPLY = "You've been unsubscribed from our messages. Reply START to subscribe again.";
+const OPT_IN_REPLY = "Welcome back! You'll receive our updates again.";
+
+/** [compliance] Returns true when the message was a STOP/START keyword (caller must then skip chatbot + automations). */
+async function handleOptKeyword(
+  msg: { type?: string; text?: { body?: string } },
+  waAccount: { organizationId: string; accessToken: string; phoneNumberId: string },
+  contact: { id: string; phone: string }, conversationId: string): Promise<boolean> {
+  if (msg?.type !== "text") return false;
+  const word = String(msg.text?.body ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  const optOut = OPT_OUT_KEYWORDS.has(word);
+  if (!optOut && !OPT_IN_KEYWORDS.has(word)) return false;
+
+  try {
+    await prisma.contact.update({ where: { id: contact.id }, data: { optedOut: optOut } });
+
+    const text = optOut ? OPT_OUT_REPLY : OPT_IN_REPLY;
+    let wamid: string | undefined;
+    let failure: string | undefined;
+    try {
+      const res = await sendTextMessage({ to: contact.phone, text, accessToken: waAccount.accessToken, phoneNumberId: waAccount.phoneNumberId });
+      wamid = res.messages?.[0]?.id;
+    } catch (e) {
+      failure = e instanceof Error ? e.message : "Send failed";
+      console.error("[compliance] confirmation send failed:", failure);
+    }
+
+    const reply = await prisma.message.create({
+      data: {
+        conversationId, organizationId: waAccount.organizationId, wamid,
+        direction: "OUTBOUND", type: "TEXT", status: failure ? "FAILED" : "SENT",
+        failureReason: failure?.slice(0, 190), content: text, isBotMessage: true,
+      },
+    });
+    await prisma.conversationNote.create({
+      data: {
+        conversationId,
+        content: optOut
+          ? `Contact replied "${word.toUpperCase()}" and was unsubscribed automatically (opted out of all messages).`
+          : `Contact replied "${word.toUpperCase()}" and was re-subscribed automatically.`,
+      },
+    }).catch(() => undefined);
+    await prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date() } });
+    if (!failure) await prisma.usageLog.create({ data: { organizationId: waAccount.organizationId, type: "MESSAGE_SENT" } }).catch(() => undefined);
+
+    try {
+      await pusherServer.trigger(conversationChannel(conversationId), PUSHER_EVENTS.NEW_MESSAGE, { message: reply });
+      await pusherServer.trigger(orgChannel(waAccount.organizationId), PUSHER_EVENTS.CONVERSATION_UPDATED, { conversationId, lastMessage: text });
+    } catch { /* realtime is best-effort */ }
+  } catch (err) {
+    console.error("[compliance] opt keyword handling failed:", err);
+  }
+  return true;
 }
 
 async function handleStatusUpdate(status: any, organizationId: string) {
@@ -223,6 +292,7 @@ async function handleStatusUpdate(status: any, organizationId: string) {
   await applyRecipientStatus(wamid, mapped as never, new Date(Number(timestamp) * 1000 || Date.now()), status.errors?.[0]?.title);
 
   if (result.count > 0) {
+    after(() => emitMessageStatus(wamid, mapped)); // [webhooks]
     const msg = await prisma.message.findFirst({ where: { wamid } });
     if (msg) {
       await pusherServer.trigger(
@@ -242,6 +312,8 @@ function extractMessageContent(msg: any) {
       return { type: "IMAGE", content: msg.image?.caption ?? null, mediaUrl: msg.image?.id ?? null, mediaType: "image" };
     case "video":
       return { type: "VIDEO", content: msg.video?.caption ?? null, mediaUrl: msg.video?.id ?? null, mediaType: "video" };
+    case "sticker":
+      return { type: "STICKER", content: null, mediaUrl: msg.sticker?.id ?? null, mediaType: msg.sticker?.mime_type ?? "image/webp" };
     case "audio":
       return { type: "AUDIO", content: null, mediaUrl: msg.audio?.id ?? null, mediaType: "audio" };
     case "document":

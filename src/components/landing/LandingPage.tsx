@@ -1,372 +1,334 @@
 "use client";
 
-import { Icon } from "@/components/ui/icon";
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import Image from "next/image";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
-import axios from "axios";
+import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
+import { Eyebrow, FOCUS, Logo } from "./brand";
+import { HeroMockup } from "./HeroMockup";
+import { Pricing } from "./Pricing";
 
-type Plan = {
-  id: string; name: string; slug: string; description?: string;
-  monthlyPrice: number; annualPrice: number; currency: string;
-  isPopular: boolean; features: string[];
-  maxUsers: number; maxBroadcasts: number; maxAutomations: number;
-  maxApiCalls: number; maxAiCredits: number; maxWhatsappNumbers: number;
-};
+// ─── Content ──────────────────────────────────────────────────────────────────
+const NAV_LINKS = [
+  { label: "Features", href: "#features" },
+  { label: "How it works", href: "#how-it-works" },
+  { label: "Use cases", href: "#use-cases" },
+  { label: "Pricing", href: "#pricing" },
+  { label: "FAQ", href: "#faq" },
+];
 
-const CURRENCY_SYMBOL: Record<string, string> = { USD: "$", INR: "₹", EUR: "€", GBP: "£" };
+const HERO_STATS = [
+  { value: "8k+", label: "Indian businesses" },
+  { value: "90%+", label: "Message open rate" },
+  { value: "3x", label: "Faster replies" },
+];
+
+const INDUSTRIES = [
+  "Kirana & retail stores", "D2C fashion brands", "Coaching institutes", "Real estate brokers",
+  "Clinics & diagnostics", "Travel agencies", "Restaurants & cloud kitchens", "Salons & spas",
+  "Jewellers", "Electronics dealers", "Gyms & fitness studios", "Insurance advisors",
+];
 
 const FEATURES = [
+  { icon: "forum", tint: "bg-green-100 text-green-700", title: "Shared team inbox", desc: "One WhatsApp number, many agents. Assign chats, add internal notes and labels, and never miss the 24-hour reply window." },
+  { icon: "campaign", tint: "bg-sky-100 text-sky-700", title: "Bulk broadcasts", desc: "Send personalised offers to thousands of opted-in customers, schedule campaigns and track delivered, read and replied." },
+  { icon: "smart_toy", tint: "bg-violet-100 text-violet-700", title: "No-code chatbots", desc: "Answer price, stock and order-status questions 24/7 with button-based flows — in English, Hindi or Hinglish." },
+  { icon: "bolt", tint: "bg-amber-100 text-amber-700", title: "Automation", desc: "Auto-reply, tag and route chats by keyword, time or label. Welcome messages and away messages on autopilot." },
+  { icon: "description", tint: "bg-rose-100 text-rose-700", title: "Approved templates", desc: "Create Meta-approved templates with variables, media and buttons for OTPs, order updates and reminders." },
+  { icon: "monitoring", tint: "bg-teal-100 text-teal-700", title: "Analytics & reports", desc: "See response times, agent performance and campaign results. Download reports for your weekly review." },
+  { icon: "contacts", tint: "bg-indigo-100 text-indigo-700", title: "Contacts & CSV import", desc: "Import contacts from Excel or CSV, segment with tags and custom fields, and target the right audience." },
+  { icon: "admin_panel_settings", tint: "bg-slate-200 text-slate-800", title: "Roles & security", desc: "Owner, admin and agent roles, invite-only team access and secure login so customer data stays protected." },
+];
+
+const STEPS = [
+  { icon: "smartphone", title: "Connect your number", desc: "Link your WhatsApp Business number through the official Meta Business API. Most teams are live in under 10 minutes." },
+  { icon: "group", title: "Invite your team", desc: "Add agents, set roles, import your contacts from CSV and set up quick replies, templates and a welcome bot." },
+  { icon: "rocket_launch", title: "Start selling & supporting", desc: "Run broadcasts, reply from one inbox and let automations handle the repetitive questions round the clock." },
+];
+
+type UseCase = {
+  id: string; label: string; icon: string; image: string; alt: string; objectPosition: string;
+  title: string; desc: string; points: string[]; metric: { value: string; label: string };
+  chat: { q: string; a: string };
+};
+
+const USE_CASES: UseCase[] = [
   {
-    icon: "inbox", color: "#25D366", bg: "#dcfce7",
-    title: "Team Inbox",
-    desc: "Collaborate on every WhatsApp conversation. Assign, respond, and resolve together as a team.",
+    id: "retail", label: "Retail / D2C", icon: "sell",
+    image: "/images/auth/register.jpg", alt: "Indian shop owner at his store counter in Manali", objectPosition: "center 40%",
+    title: "Turn WhatsApp chats into UPI orders",
+    desc: "Share catalogues, answer size and stock questions instantly and send payment links — without switching apps.",
+    points: ["Festive sale broadcasts to opted-in buyers", "Order confirmation and dispatch updates", "Abandoned-cart nudges with a payment link"],
+    metric: { value: "38%", label: "more repeat orders" },
+    chat: { q: "Diwali offer wala silk saree abhi bhi hai?", a: "Haan ji! 20% off · ₹2,399. Payment link bhej diya." },
   },
   {
-    icon: "campaign", color: "#3b82f6", bg: "#dbeafe",
-    title: "Broadcast Campaigns",
-    desc: "Send personalized messages to thousands of customers at once with detailed delivery analytics.",
+    id: "education", label: "Education", icon: "workspace_premium",
+    image: "/images/landing/education.jpg", alt: "Indian tutor and student studying together with a laptop", objectPosition: "center 55%",
+    title: "Fill batches and keep parents in the loop",
+    desc: "Capture enquiries from ads, share brochures and demo-class links, and send fee and attendance reminders automatically.",
+    points: ["Auto-reply with course details and fees", "Demo class and exam reminders", "Fee due alerts with payment link"],
+    metric: { value: "2x", label: "more demo-class sign-ups" },
+    chat: { q: "Kal ki demo class kitne baje hai?", a: "Kal 5 PM. Class link aur notes bhej diye." },
   },
   {
-    icon: "smart_toy", color: "#8b5cf6", bg: "#ede9fe",
-    title: "Chatbot Builder",
-    desc: "Build no-code chatbots with a drag-and-drop flow editor to automate customer interactions 24/7.",
+    id: "real-estate", label: "Real estate", icon: "apartment",
+    image: "/images/auth/recover.jpg", alt: "Young Sikh businessman working on his laptop", objectPosition: "35% center",
+    title: "Qualify leads and book site visits faster",
+    desc: "Respond to portal and ad leads in seconds, share floor plans and location pins, and route hot buyers to the right agent.",
+    points: ["Instant lead reply with project brochure", "Site-visit booking and reminders", "Assign leads to agents by locality"],
+    metric: { value: "5 min", label: "average first response" },
+    chat: { q: "Whitefield mein 2BHK site visit book karni hai", a: "Done! Saturday 11 AM · Location pin bheja." },
   },
   {
-    icon: "bolt", color: "#f59e0b", bg: "#fef3c7",
-    title: "Smart Automation",
-    desc: "Set up smart workflows that automatically respond, tag, and route conversations based on your rules.",
-  },
-  {
-    icon: "monitoring", color: "#ef4444", bg: "#fee2e2",
-    title: "Analytics & Reports",
-    desc: "Track message volume, response rates, agent performance, and campaign effectiveness in real time.",
-  },
-  {
-    icon: "code", color: "#0ea5e9", bg: "#e0f2fe",
-    title: "Developer API",
-    desc: "Integrate ChatFlow into your CRM, e-commerce, or custom app with our comprehensive REST API.",
+    id: "clinics", label: "Clinics", icon: "schedule",
+    image: "/images/auth/login.jpg", alt: "Indian woman in a kurta booking an appointment on her phone", objectPosition: "center 65%",
+    title: "Appointments and reminders on autopilot",
+    desc: "Let patients book, reschedule and get reports on WhatsApp — and cut no-shows with timely reminders.",
+    points: ["Appointment booking chatbot", "Reminder one hour before the visit", "Share reports and follow-up instructions"],
+    metric: { value: "40%", label: "fewer no-shows" },
+    chat: { q: "Dr. Mehta ka appointment kal mil sakta hai?", a: "Kal 10:30 AM confirm. Reminder 1 ghanta pehle aayega." },
   },
 ];
 
-const STATS = [
-  { value: "10,000+", label: "Businesses" },
-  { value: "50M+",    label: "Messages / Month" },
-  { value: "99.9%",   label: "Uptime SLA" },
-  { value: "150+",    label: "Countries" },
+const FAQS = [
+  { q: "What do I need to get started?", a: "A phone number that isn't already active on the regular WhatsApp app, and a Facebook (Meta) business account. We guide you through connecting it to the official WhatsApp Business API — most businesses are live in under 10 minutes." },
+  { q: "Will my number get blocked if I send broadcasts?", a: "ChatFlow uses the official Meta API, not unofficial tools. Send broadcasts only to customers who have opted in, using Meta-approved templates, and your number stays healthy. We show delivery and read stats so you can spot issues early." },
+  { q: "Can my whole team reply from one WhatsApp number?", a: "Yes. Every agent logs in with their own account and works from the shared inbox. You can assign chats, leave internal notes, use labels and control what each role can see." },
+  { q: "Can I import my existing customer list?", a: "Yes. Upload contacts from a CSV or Excel export, map custom fields and tags, and use them to target broadcasts and automations." },
+  { q: "Does it support Hindi and other Indian languages?", a: "Templates, quick replies and chatbot flows can be written in any language WhatsApp supports — Hindi, Hinglish, Tamil, Marathi, Bengali and more." },
+  { q: "Are WhatsApp message charges included in the plan?", a: "Meta charges a small per-message fee for template messages (like broadcasts and reminders), which is separate from your ChatFlow plan. Replies to customers inside the 24-hour service window are free." },
+  { q: "Is there a free trial?", a: "Yes — every plan starts with a 14-day free trial. No credit card is required, and you can cancel anytime." },
 ];
 
-const HOW_IT_WORKS = [
-  {
-    step: "01", title: "Connect WhatsApp",
-    desc: "Link your WhatsApp Business number via the Meta Business API. Takes under 10 minutes.",
-  },
-  {
-    step: "02", title: "Set Up Your Team",
-    desc: "Invite agents, create teams, set roles, and configure your automated workflows.",
-  },
-  {
-    step: "03", title: "Start Messaging at Scale",
-    desc: "Launch broadcasts, handle conversations, and watch your customer engagement grow.",
-  },
-];
+// ─── Shared bits ──────────────────────────────────────────────────────────────
+const btnPrimary = cn(
+  "inline-flex items-center justify-center gap-2 rounded-2xl bg-[#25D366] font-bold text-slate-950 shadow-lg shadow-green-500/25 transition-all hover:brightness-110",
+  FOCUS, "focus-visible:ring-offset-slate-950"
+);
+const btnGhostDark = cn(
+  "inline-flex items-center justify-center gap-2 rounded-2xl border border-white/20 font-semibold text-white transition-colors hover:bg-white/10",
+  FOCUS, "focus-visible:ring-offset-slate-950"
+);
 
-const TESTIMONIALS = [
-  {
-    name: "Rahul Mehta", role: "CEO, GrowFast India",
-    text: "ChatFlow transformed how we handle customer support. Our response time dropped from 6 hours to under 10 minutes.",
-    rating: 5,
-  },
-  {
-    name: "Priya Sharma", role: "Marketing Head, ShopBolt",
-    text: "The broadcast feature is incredible. We sent 50,000 messages for our sale and got a 38% click-through rate.",
-    rating: 5,
-  },
-  {
-    name: "David Osei", role: "Founder, TechBridge GH",
-    text: "The chatbot builder is so intuitive. We built a complete customer onboarding flow in a single afternoon.",
-    rating: 5,
-  },
-];
-
-// ─── Mobile Bottom Nav ────────────────────────────────────────────────────────
-function MobileBottomNav({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: string }) {
-  const items = isLoggedIn
-    ? [
-        { icon: "home",     label: "Home",      href: "#",         highlight: false },
-        { icon: "bolt",      label: "Features",  href: "#features", highlight: false },
-        { icon: "sell",       label: "Pricing",   href: "#pricing",  highlight: false },
-        { icon: "rocket_launch",    label: "Dashboard", href: dashHref,    highlight: true  },
-      ]
-    : [
-        { icon: "home",  label: "Home",     href: "#",          highlight: false },
-        { icon: "bolt",   label: "Features", href: "#features",  highlight: false },
-        { icon: "sell",    label: "Pricing",  href: "#pricing",   highlight: false },
-        { icon: "person",   label: "Login",    href: "/login",     highlight: false },
-        { icon: "rocket_launch", label: "Start",    href: "/register",  highlight: true  },
-      ];
-
+function SectionHeading({ eyebrow, title, sub, id, dark = false }: { eyebrow: string; title: string; sub?: string; id: string; dark?: boolean }) {
   return (
-    <div className="md:hidden fixed bottom-0 inset-x-0 z-50 bg-white border-t shadow-2xl"
-      style={{ borderColor: "#e2e8f0" }}>
-      <div className="flex items-stretch">
-        {items.map((item) => {
-          const isPage = item.href.startsWith("/");
-          const Comp = isPage ? Link : "a";
-          return (
-            <Comp
-              key={item.label}
-              href={item.href}
-              className={cn(
-                "flex-1 flex flex-col items-center justify-center gap-1 py-2.5 text-xs font-medium transition-colors",
-                item.highlight ? "text-white" : "text-slate-500 hover:text-green-600"
-              )}
-              style={item.highlight ? { background: "#25D366" } : {}}
-            >
-              <Icon name={item.icon} className="w-5 h-5" />
-              {item.label}
-            </Comp>
-          );
-        })}
-      </div>
+    <div className="mx-auto max-w-2xl text-center">
+      <Eyebrow dark={dark}>{eyebrow}</Eyebrow>
+      <h2 id={id} className={cn("mt-3 text-3xl sm:text-4xl font-extrabold tracking-tight", dark ? "text-white" : "text-slate-900")}>{title}</h2>
+      {sub && <p className={cn("mt-3 text-base sm:text-lg", dark ? "text-slate-300" : "text-slate-600")}>{sub}</p>}
     </div>
   );
 }
 
+type NavProps = { isLoggedIn: boolean; dashHref: string; dashLabel: string };
+
 // ─── Navbar ───────────────────────────────────────────────────────────────────
-function Navbar({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: string }) {
+function Navbar({ isLoggedIn, dashHref, dashLabel }: NavProps) {
   const [scrolled, setScrolled] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 20);
-    window.addEventListener("scroll", onScroll);
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  const links = [
-    { label: "Features", href: "#features" },
-    { label: "How It Works", href: "#how-it-works" },
-    { label: "Pricing", href: "#pricing" },
-  ];
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        buttonRef.current?.focus();
+      }
+    };
+    const onResize = () => { if (window.innerWidth >= 1024) setOpen(false); };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [open]);
 
   return (
-    <nav
+    <header
       className={cn(
-        "fixed top-0 inset-x-0 z-50 transition-all duration-300",
-        scrolled ? "bg-white shadow-md" : "bg-transparent"
+        "sticky top-0 z-50 border-b backdrop-blur-xl transition-colors duration-300",
+        scrolled || open ? "border-white/10 bg-slate-950/95 shadow-lg shadow-black/20" : "border-transparent bg-slate-950"
       )}
     >
-      <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#25D366" }}>
-            <svg viewBox="0 0 24 24" fill="white" className="w-5 h-5">
-              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
-            </svg>
-          </div>
-          <span className={cn("font-bold text-lg", scrolled ? "text-slate-900" : "text-white")}>ChatFlow</span>
-        </div>
+      <nav aria-label="Main" className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+        <Logo />
 
-        <div className="hidden md:flex items-center gap-8">
-          {links.map((l) => (
-            <a
-              key={l.href} href={l.href}
-              className={cn("text-sm font-medium transition-colors hover:text-green-500",
-                scrolled ? "text-slate-600" : "text-white/80")}
-            >
-              {l.label}
-            </a>
+        <ul className="hidden lg:flex items-center gap-1">
+          {NAV_LINKS.map((l) => (
+            <li key={l.href}>
+              <a href={l.href} className={cn("rounded-lg px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:text-white", FOCUS, "focus-visible:ring-offset-slate-950")}>
+                {l.label}
+              </a>
+            </li>
           ))}
-        </div>
+        </ul>
 
-        <div className="hidden md:flex items-center gap-3">
+        <div className="hidden lg:flex items-center gap-2">
           {isLoggedIn ? (
-            <Link href={dashHref}
-              className="text-sm font-semibold px-5 py-2 rounded-xl text-white transition-all hover:brightness-110 flex items-center gap-2"
-              style={{ background: "#25D366" }}
-            >
-              <Icon name={"rocket_launch"} className="w-3.5 h-3.5" />
-              Go to Dashboard
+            <Link href={dashHref} className={cn(btnPrimary, "rounded-xl px-5 py-2.5 text-sm")}>
+              <Icon name={dashHref === "/admin" ? "admin_panel_settings" : "dashboard"} className="w-4 h-4" />
+              {dashLabel}
             </Link>
           ) : (
             <>
-              <Link href="/login"
-                className={cn("text-sm font-medium px-4 py-2 rounded-xl transition-colors",
-                  scrolled ? "text-slate-700 hover:bg-slate-100" : "text-white/90 hover:bg-white/10")}
-              >
-                Login
+              <Link href="/login" className={cn("inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-white/10", FOCUS, "focus-visible:ring-offset-slate-950")}>
+                <Icon name="login" className="w-4 h-4" /> Login
               </Link>
-              <Link href="/register"
-                className="text-sm font-semibold px-5 py-2 rounded-xl text-white transition-all hover:brightness-110"
-                style={{ background: "#25D366" }}
-              >
-                Get Started Free
+              <Link href="/register" className={cn(btnPrimary, "rounded-xl px-5 py-2.5 text-sm")}>
+                Start free trial
               </Link>
             </>
           )}
         </div>
 
         <button
-          className={cn("md:hidden p-2 rounded-lg", scrolled ? "text-slate-700" : "text-white")}
-          onClick={() => setMobileOpen(!mobileOpen)}
+          ref={buttonRef}
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-controls="mobile-menu"
+          aria-label={open ? "Close menu" : "Open menu"}
+          className={cn("lg:hidden -mr-1 inline-flex h-11 w-11 items-center justify-center rounded-xl text-white hover:bg-white/10", FOCUS, "focus-visible:ring-offset-slate-950")}
         >
-          <Icon name={mobileOpen ? "close" : "menu"} className="w-5 h-5" />
+          <Icon name={open ? "close" : "menu"} className="w-6 h-6" />
         </button>
-      </div>
+      </nav>
 
-      {mobileOpen && (
-        <div className="md:hidden bg-white border-t shadow-lg px-6 py-4 space-y-3">
-          {links.map((l) => (
-            <a key={l.href} href={l.href} onClick={() => setMobileOpen(false)}
-              className="block text-sm font-medium text-slate-700 py-2">
-              {l.label}
-            </a>
+      <div id="mobile-menu" hidden={!open} className="lg:hidden border-t border-white/10 bg-slate-950 px-4 pb-6 pt-2 sm:px-6">
+        <ul className="divide-y divide-white/5">
+          {NAV_LINKS.map((l) => (
+            <li key={l.href}>
+              <a
+                href={l.href}
+                onClick={() => setOpen(false)}
+                className={cn("flex items-center justify-between rounded-lg px-1 py-3.5 text-base font-medium text-slate-200 hover:text-white", FOCUS, "focus-visible:ring-offset-slate-950")}
+              >
+                {l.label}
+                <Icon name="chevron_right" className="w-5 h-5 text-slate-500" />
+              </a>
+            </li>
           ))}
-          <div className="flex flex-col gap-2 pt-2 border-t">
-            {isLoggedIn ? (
-              <Link href={dashHref} className="text-center py-2.5 text-sm font-semibold rounded-xl text-white" style={{ background: "#25D366" }}>Go to Dashboard</Link>
-            ) : (
-              <>
-                <Link href="/login" className="text-center py-2.5 text-sm font-medium border border-slate-200 rounded-xl text-slate-700">Login</Link>
-                <Link href="/register" className="text-center py-2.5 text-sm font-semibold rounded-xl text-white" style={{ background: "#25D366" }}>Get Started Free</Link>
-              </>
-            )}
-          </div>
+        </ul>
+        <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
+          {isLoggedIn ? (
+            <Link href={dashHref} className={cn(btnPrimary, "py-3 text-sm sm:col-span-2")}>
+              {dashLabel} <Icon name="arrow_forward" className="w-4 h-4" />
+            </Link>
+          ) : (
+            <>
+              <Link href="/login" className={cn(btnGhostDark, "py-3 text-sm")}>Login</Link>
+              <Link href="/register" className={cn(btnPrimary, "py-3 text-sm")}>Start free trial</Link>
+            </>
+          )}
         </div>
-      )}
-    </nav>
+      </div>
+    </header>
   );
 }
 
 // ─── Hero ─────────────────────────────────────────────────────────────────────
-function Hero({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: string }) {
+function Hero({ isLoggedIn, dashHref, dashLabel }: NavProps) {
   return (
-    <section className="relative min-h-screen flex flex-col justify-center overflow-hidden pt-16" style={{ background: "#0b1d14" }}>
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full opacity-20 blur-3xl"
-          style={{ background: "radial-gradient(circle, #25D366, transparent)" }} />
-        <div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full opacity-10 blur-3xl"
-          style={{ background: "radial-gradient(circle, #3b82f6, transparent)" }} />
+    <section aria-labelledby="hero-title" className="relative overflow-hidden bg-slate-950">
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-40 left-1/2 h-[36rem] w-[36rem] -translate-x-1/2 rounded-full bg-[#25D366]/15 blur-3xl lg:left-1/4" />
+        <div className="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-sky-500/10 blur-3xl" />
+        <div
+          className="absolute inset-0 opacity-[0.06]"
+          style={{ backgroundImage: "linear-gradient(#25D366 1px, transparent 1px), linear-gradient(90deg, #25D366 1px, transparent 1px)", backgroundSize: "56px 56px", maskImage: "radial-gradient(ellipse at top, black 30%, transparent 75%)" }}
+        />
       </div>
 
-      <div className="absolute inset-0 opacity-5"
-        style={{ backgroundImage: "linear-gradient(#25D366 1px, transparent 1px), linear-gradient(90deg, #25D366 1px, transparent 1px)", backgroundSize: "60px 60px" }} />
+      <div className="relative mx-auto grid max-w-7xl items-center gap-14 px-4 pb-20 pt-12 sm:px-6 sm:pt-16 lg:grid-cols-[1.05fr_1fr] lg:gap-10 lg:px-8 lg:pb-28 lg:pt-20">
+        <div className="landing-fade-up text-center lg:text-left">
+          <p className="inline-flex items-center gap-2 rounded-full border border-[#25D366]/30 bg-[#25D366]/10 px-3.5 py-1.5 text-xs font-semibold text-green-300">
+            <Icon name="verified" filled className="w-4 h-4 text-[#25D366]" />
+            Official WhatsApp Business API platform
+          </p>
 
-      <div className="relative max-w-7xl mx-auto px-6 py-20 flex flex-col items-center text-center gap-8">
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-semibold border"
-          style={{ borderColor: "#25D36640", background: "#25D36615", color: "#4ade80" }}>
-          <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-          Powered by Meta WhatsApp Business API
-        </div>
+          <h1 id="hero-title" className="mt-6 text-[2.35rem] leading-[1.08] sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white">
+            Sell, support and grow your business on <span className="text-[#25D366]">WhatsApp</span>
+          </h1>
 
-        <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold text-white leading-tight max-w-4xl">
-          The Complete{" "}
-          <span style={{ color: "#25D366" }}>WhatsApp</span>
-          {" "}Business Platform
-        </h1>
+          <p className="mx-auto mt-5 max-w-xl text-base sm:text-lg leading-relaxed text-slate-300 lg:mx-0">
+            One shared inbox for your whole team, bulk broadcasts that actually get read, and chatbots that reply in Hinglish — built for Indian businesses.
+          </p>
 
-        <p className="text-lg sm:text-xl text-white/60 max-w-2xl leading-relaxed">
-          Manage team inboxes, run broadcast campaigns, automate conversations, and build chatbots — all from one powerful dashboard.
-        </p>
-
-        <div className="flex flex-col sm:flex-row items-center gap-4">
-          {isLoggedIn ? (
-            <Link href={dashHref}
-              className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-bold text-white transition-all hover:brightness-110 shadow-lg"
-              style={{ background: "#25D366", boxShadow: "0 0 30px #25D36650" }}
-            >
-              <Icon name={"rocket_launch"} className="w-4 h-4" />
-              Go to Dashboard
-            </Link>
-          ) : (
-            <>
-              <Link href="/register"
-                className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-bold text-white transition-all hover:brightness-110 shadow-lg"
-                style={{ background: "#25D366", boxShadow: "0 0 30px #25D36650" }}
-              >
-                Get Started Free
-                <Icon name={"arrow_forward"} className="w-4 h-4" />
+          <div className="mt-8 flex flex-col items-stretch gap-3 sm:flex-row sm:justify-center lg:justify-start">
+            {isLoggedIn ? (
+              <Link href={dashHref} className={cn(btnPrimary, "px-7 py-4 text-base")}>
+                <Icon name="rocket_launch" className="w-5 h-5" /> {dashLabel}
               </Link>
-              <Link href="/login"
-                className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-semibold text-white/80 border border-white/20 hover:bg-white/10 transition-all"
-              >
-                Login to Dashboard
-              </Link>
-            </>
-          )}
+            ) : (
+              <>
+                <Link href="/register" className={cn(btnPrimary, "px-7 py-4 text-base")}>
+                  Start free trial <Icon name="arrow_forward" className="w-5 h-5" />
+                </Link>
+                <Link href="/login" className={cn(btnGhostDark, "px-7 py-4 text-base")}>
+                  <Icon name="login" className="w-5 h-5" /> Login
+                </Link>
+              </>
+            )}
+          </div>
+
+          <ul className="mt-6 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-slate-300 lg:justify-start">
+            {(isLoggedIn ? ["Welcome back — your dashboard is ready"] : ["14-day free trial", "No credit card", "Live in 10 minutes"]).map((t) => (
+              <li key={t} className="inline-flex items-center gap-1.5">
+                <Icon name="check_circle" filled className="w-4 h-4 text-[#25D366]" /> {t}
+              </li>
+            ))}
+          </ul>
+
+          <dl className="mx-auto mt-10 grid max-w-lg grid-cols-3 gap-2.5 sm:gap-3 lg:mx-0">
+            {HERO_STATS.map((s) => (
+              <div key={s.label} className="rounded-2xl border border-white/10 bg-white/5 p-3 sm:p-4 backdrop-blur-md">
+                <dt className="sr-only">{s.label}</dt>
+                <dd>
+                  <span className="block text-xl sm:text-2xl font-bold text-[#25D366]">{s.value}</span>
+                  <span className="mt-0.5 block text-[11px] sm:text-xs leading-tight text-slate-300">{s.label}</span>
+                </dd>
+              </div>
+            ))}
+          </dl>
         </div>
 
-        <p className="text-sm text-white/30">{isLoggedIn ? "Welcome back! Your dashboard is ready." : "No credit card required · Free 14-day trial"}</p>
-
-        <div className="w-full max-w-5xl mt-6 rounded-2xl overflow-hidden shadow-2xl border border-white/10"
-          style={{ background: "#0f2318" }}>
-          <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10" style={{ background: "#0a1a10" }}>
-            <div className="w-3 h-3 rounded-full bg-red-500 opacity-80" />
-            <div className="w-3 h-3 rounded-full bg-yellow-400 opacity-80" />
-            <div className="w-3 h-3 rounded-full bg-green-500 opacity-80" />
-            <div className="ml-4 flex-1 bg-white/10 rounded-lg px-4 py-1 text-xs text-white/30 text-left">
-              app.chatflow.io/dashboard
-            </div>
-          </div>
-          <div className="flex" style={{ minHeight: 320 }}>
-            <div className="w-44 border-r border-white/10 p-4 space-y-3 shrink-0" style={{ background: "#0a1a10" }}>
-              <div className="h-6 rounded-lg bg-green-500/20" />
-              {["Dashboard","Inbox","Contacts","Broadcasts","Templates","Chatbots","Automation","Analytics"].map((item, i) => (
-                <div key={item} className={cn("h-5 rounded-md", i === 0 ? "bg-green-500/30" : "bg-white/5")} />
-              ))}
-            </div>
-            <div className="flex-1 p-5 space-y-4">
-              <div className="grid grid-cols-3 gap-3">
-                {[["#25D366","Open Chats","142"],["#3b82f6","Messages Sent","8.4K"],["#8b5cf6","New Contacts","237"]].map(([c,l,v]) => (
-                  <div key={l} className="rounded-xl p-3 border border-white/10" style={{ background: "#0a1a10" }}>
-                    <div className="text-xs mb-1" style={{ color: `${c}99` }}>{l}</div>
-                    <div className="text-2xl font-bold" style={{ color: c }}>{v}</div>
-                  </div>
-                ))}
-              </div>
-              <div className="rounded-xl border border-white/10 p-3" style={{ background: "#0a1a10", height: 140 }}>
-                <div className="text-xs text-white/30 mb-3">Message Volume — Last 7 Days</div>
-                <div className="flex items-end gap-1.5 h-20">
-                  {[40,65,45,80,60,90,75].map((h, i) => (
-                    <div key={i} className="flex-1 rounded-sm opacity-70"
-                      style={{ height: `${h}%`, background: i % 2 === 0 ? "#25D366" : "#3b82f6" }} />
-                  ))}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {["Recent Conversations","Recent Broadcasts"].map((title) => (
-                  <div key={title} className="rounded-xl border border-white/10 p-3" style={{ background: "#0a1a10" }}>
-                    <div className="text-xs text-white/30 mb-2">{title}</div>
-                    {[1,2,3].map(i => (
-                      <div key={i} className="flex items-center gap-2 py-1.5 border-b border-white/5 last:border-0">
-                        <div className="w-5 h-5 rounded-full bg-green-500/30 shrink-0" />
-                        <div className="flex-1 h-2.5 bg-white/10 rounded" />
-                        <div className="w-10 h-4 bg-green-500/20 rounded-full" />
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+        <HeroMockup />
       </div>
     </section>
   );
 }
 
-// ─── Stats ────────────────────────────────────────────────────────────────────
-function Stats() {
+// ─── Trust strip ──────────────────────────────────────────────────────────────
+function TrustStrip() {
+  const row = (hidden: boolean) => (
+    <ul aria-hidden={hidden || undefined} className="flex shrink-0 items-center gap-3 pr-3">
+      {INDUSTRIES.map((n) => (
+        <li key={n} className="whitespace-nowrap rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700">
+          {n}
+        </li>
+      ))}
+    </ul>
+  );
   return (
-    <section className="py-12 bg-white border-b" style={{ borderColor: "#e2e8f0" }}>
-      <div className="max-w-5xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
-        {STATS.map((s) => (
-          <div key={s.label}>
-            <p className="text-4xl font-extrabold text-slate-900">{s.value}</p>
-            <p className="text-sm text-slate-500 mt-1">{s.label}</p>
-          </div>
-        ))}
+    <section aria-label="Who uses ChatFlow" className="border-b border-slate-200 bg-slate-50 py-10">
+      <p className="px-4 text-center text-sm font-semibold text-slate-600">
+        Trusted by 8,000+ growing businesses across India
+      </p>
+      <div className="relative mt-5 overflow-hidden [mask-image:linear-gradient(90deg,transparent,black_8%,black_92%,transparent)]">
+        <div className="landing-marquee flex w-max">
+          {row(false)}
+          {row(true)}
+        </div>
       </div>
     </section>
   );
@@ -375,59 +337,192 @@ function Stats() {
 // ─── Features ─────────────────────────────────────────────────────────────────
 function Features() {
   return (
-    <section id="features" className="py-24" style={{ background: "#f8fafc" }}>
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="text-center mb-14">
-          <p className="text-sm font-semibold uppercase tracking-widest mb-3" style={{ color: "#25D366" }}>Features</p>
-          <h2 className="text-4xl font-extrabold text-slate-900">Everything you need to grow on WhatsApp</h2>
-          <p className="text-lg text-slate-500 mt-3 max-w-2xl mx-auto">
-            One platform that replaces five tools — inbox, CRM, campaigns, automation, and analytics.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <section id="features" aria-labelledby="features-title" className="scroll-mt-20 bg-white py-20 sm:py-24">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <SectionHeading
+          id="features-title"
+          eyebrow="Features"
+          title="Everything you need to run your business on WhatsApp"
+          sub="Inbox, campaigns, chatbots and reports in one place — no more juggling five phones and three tools."
+        />
+        <ul className="mt-14 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 sm:gap-5">
           {FEATURES.map((f) => (
-            <div key={f.title}
-              className="bg-white rounded-2xl border p-6 hover:shadow-md transition-shadow group"
-              style={{ borderColor: "#e2e8f0" }}
-            >
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110"
-                style={{ background: f.bg }}>
-                <Icon name={f.icon} className="w-5 h-5" style={{ color: f.color }} />
+            <li key={f.title} className="group flex gap-4 rounded-3xl border border-slate-200 bg-white p-5 sm:block sm:p-6 transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-xl motion-reduce:hover:translate-y-0">
+              <span className={cn("flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl", f.tint)}>
+                <Icon name={f.icon} className="w-6 h-6" />
+              </span>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 sm:mt-5">{f.title}</h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-slate-600 sm:mt-2">{f.desc}</p>
               </div>
-              <h3 className="text-base font-bold text-slate-900 mb-2">{f.title}</h3>
-              <p className="text-sm text-slate-500 leading-relaxed">{f.desc}</p>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       </div>
     </section>
   );
 }
 
-// ─── How It Works ─────────────────────────────────────────────────────────────
+// ─── How it works ─────────────────────────────────────────────────────────────
 function HowItWorks() {
   return (
-    <section id="how-it-works" className="py-24 bg-white">
-      <div className="max-w-5xl mx-auto px-6">
-        <div className="text-center mb-14">
-          <p className="text-sm font-semibold uppercase tracking-widest mb-3" style={{ color: "#25D366" }}>How It Works</p>
-          <h2 className="text-4xl font-extrabold text-slate-900">Up and running in minutes</h2>
+    <section id="how-it-works" aria-labelledby="how-title" className="relative scroll-mt-20 overflow-hidden bg-slate-950 py-20 sm:py-24">
+      <div aria-hidden className="pointer-events-none absolute -right-40 top-0 h-96 w-96 rounded-full bg-[#25D366]/10 blur-3xl" />
+      <div className="relative mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+        <SectionHeading id="how-title" dark eyebrow="How it works" title="Live on WhatsApp in three simple steps" />
+        <div className="relative mt-14">
+          <div aria-hidden className="absolute left-[16%] right-[16%] top-[3.25rem] hidden h-px bg-gradient-to-r from-[#25D366]/0 via-[#25D366]/50 to-[#25D366]/0 md:block" />
+          <ol className="relative grid gap-5 md:grid-cols-3">
+          {STEPS.map((s, i) => (
+            <li key={s.title} className="relative rounded-3xl border border-white/10 bg-white/5 p-6 sm:p-7 backdrop-blur-md">
+              <div className="flex items-center gap-3">
+                <span className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-[#25D366] text-slate-950 shadow-lg shadow-green-500/30">
+                  <Icon name={s.icon} className="w-7 h-7" />
+                </span>
+                <span className="text-sm font-bold text-slate-400">Step {i + 1}</span>
+              </div>
+              <h3 className="mt-5 text-lg font-bold text-white">{s.title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-slate-300">{s.desc}</p>
+            </li>
+          ))}
+          </ol>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── Use cases (tabs) ─────────────────────────────────────────────────────────
+function UseCases() {
+  const [active, setActive] = useState(0);
+  const tabs = useRef<(HTMLButtonElement | null)[]>([]);
+  const uc = USE_CASES[active];
+
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const n = USE_CASES.length;
+    let next: number | null = null;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (active + 1) % n;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (active - 1 + n) % n;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = n - 1;
+    if (next === null) return;
+    e.preventDefault();
+    setActive(next);
+    tabs.current[next]?.focus();
+  };
+
+  return (
+    <section id="use-cases" aria-labelledby="use-cases-title" className="scroll-mt-20 bg-white py-20 sm:py-24">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <SectionHeading
+          id="use-cases-title"
+          eyebrow="Use cases"
+          title="Built for the way India does business"
+          sub="From a single shop to a multi-city brand — see how teams like yours use ChatFlow."
+        />
+
+        <div role="tablist" aria-label="Industries" onKeyDown={onKeyDown} className="mx-auto mt-10 grid max-w-3xl grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1.5 sm:grid-cols-4">
+          {USE_CASES.map((u, i) => {
+            const selected = i === active;
+            return (
+              <button
+                key={u.id}
+                ref={(el) => { tabs.current[i] = el; }}
+                type="button"
+                role="tab"
+                id={`tab-${u.id}`}
+                aria-selected={selected}
+                aria-controls={`panel-${u.id}`}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => setActive(i)}
+                className={cn(
+                  "inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors",
+                  selected ? "bg-slate-950 text-white shadow" : "text-slate-600 hover:text-slate-900",
+                  FOCUS
+                )}
+              >
+                <Icon name={u.icon} className="w-4 h-4" /> {u.label}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-10 relative">
-          <div className="hidden md:block absolute top-8 left-1/6 right-1/6 h-px"
-            style={{ background: "linear-gradient(90deg, #25D366, #3b82f6, #8b5cf6)" }} />
-
-          {HOW_IT_WORKS.map((s, i) => (
-            <div key={s.step} className="flex flex-col items-center text-center gap-4">
-              <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-xl font-black text-white shadow-lg z-10 relative"
-                style={{ background: i === 0 ? "#25D366" : i === 1 ? "#3b82f6" : "#8b5cf6" }}>
-                {s.step}
+        <div
+          key={uc.id}
+          role="tabpanel"
+          id={`panel-${uc.id}`}
+          aria-labelledby={`tab-${uc.id}`}
+          tabIndex={0}
+          className={cn("landing-fade-up mt-10 grid items-center gap-8 rounded-[2rem] lg:grid-cols-2 lg:gap-14", "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25D366]")}
+        >
+          <div className="relative aspect-[4/3] overflow-hidden rounded-[2rem] bg-slate-200 shadow-xl">
+            <Image src={uc.image} alt={uc.alt} fill sizes="(min-width: 1024px) 600px, 100vw" className="object-cover" style={{ objectPosition: uc.objectPosition }} />
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-transparent" />
+            <div className="absolute inset-x-4 bottom-4 space-y-2 sm:inset-x-6 sm:bottom-6 sm:max-w-sm">
+              <div className="mr-10 rounded-2xl rounded-tl-sm bg-white/95 px-3.5 py-2.5 shadow-xl backdrop-blur">
+                <p className="text-[13px] text-slate-800">{uc.chat.q}</p>
+                <p className="mt-0.5 text-[10px] text-slate-500">Customer</p>
               </div>
-              <h3 className="text-lg font-bold text-slate-900">{s.title}</h3>
-              <p className="text-sm text-slate-500 leading-relaxed">{s.desc}</p>
+              <div className="ml-10 rounded-2xl rounded-tr-sm bg-[#d9fdd3] px-3.5 py-2.5 shadow-xl">
+                <p className="text-[13px] text-slate-800">{uc.chat.a}</p>
+                <p className="mt-0.5 flex items-center gap-1 text-[10px] text-green-800/80">
+                  ChatFlow bot <Icon name="done_all" className="w-3.5 h-3.5 text-sky-500" />
+                </p>
+              </div>
             </div>
+          </div>
+
+          <div>
+            <h3 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">{uc.title}</h3>
+            <p className="mt-3 text-base leading-relaxed text-slate-600">{uc.desc}</p>
+            <ul className="mt-6 space-y-3">
+              {uc.points.map((p) => (
+                <li key={p} className="flex items-start gap-3 text-slate-700">
+                  <Icon name="check_circle" filled className="mt-0.5 w-5 h-5 text-green-600" /> {p}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-8 flex flex-col gap-4 sm:flex-row sm:items-center">
+              <div className="rounded-2xl border border-green-200 bg-green-50 px-5 py-3">
+                <p className="text-2xl font-extrabold text-green-700">{uc.metric.value}</p>
+                <p className="text-xs font-medium text-green-800">{uc.metric.label}*</p>
+              </div>
+              <Link href="/register" className={cn("inline-flex items-center gap-1.5 rounded-lg text-sm font-bold text-slate-900 hover:text-green-700", FOCUS)}>
+                Try it for your business <Icon name="arrow_forward" className="w-4 h-4" />
+              </Link>
+            </div>
+            <p className="mt-3 text-xs text-slate-500">*Illustrative figures — results vary by business.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── FAQ ──────────────────────────────────────────────────────────────────────
+function FAQ() {
+  return (
+    <section id="faq" aria-labelledby="faq-title" className="scroll-mt-20 bg-white py-20 sm:py-24">
+      <div className="mx-auto grid max-w-6xl gap-10 px-4 sm:px-6 lg:grid-cols-[1fr_1.6fr] lg:gap-16 lg:px-8">
+        <div className="text-center lg:text-left">
+          <Eyebrow>FAQ</Eyebrow>
+          <h2 id="faq-title" className="mt-3 text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900">Questions? We&apos;ve got answers.</h2>
+          <p className="mt-3 text-base text-slate-600">Still unsure? Start a free trial and see it working with your own WhatsApp number.</p>
+          <div className="relative mx-auto mt-8 hidden aspect-[4/5] max-w-xs overflow-hidden rounded-[2rem] shadow-xl lg:mx-0 lg:block">
+            <Image src="/images/auth/register.jpg" alt="Indian shop owner smiling at his store counter" fill sizes="320px" className="object-cover" style={{ objectPosition: "center 40%" }} />
+          </div>
+        </div>
+        <div className="self-start divide-y divide-slate-200 rounded-3xl border border-slate-200">
+          {FAQS.map((f) => (
+            <details key={f.q} className="group px-5 sm:px-6 [&_summary::-webkit-details-marker]:hidden">
+              <summary className={cn("flex cursor-pointer list-none items-center justify-between gap-4 rounded-lg py-5 text-left text-base font-semibold text-slate-900", FOCUS)}>
+                {f.q}
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 transition-transform group-open:rotate-180 group-open:bg-[#25D366] group-open:text-slate-950 motion-reduce:transition-none">
+                  <Icon name="expand_more" className="w-5 h-5" />
+                </span>
+              </summary>
+              <p className="-mt-1 pb-5 pr-2 text-sm leading-relaxed text-slate-600 sm:pr-12">{f.a}</p>
+            </details>
           ))}
         </div>
       </div>
@@ -435,243 +530,54 @@ function HowItWorks() {
   );
 }
 
-// ─── Pricing ──────────────────────────────────────────────────────────────────
-function Pricing({ isLoggedIn }: { isLoggedIn: boolean }) {
-  const [annual, setAnnual] = useState(false);
-
-  const { data, isLoading } = useQuery({
-    queryKey: ["public-plans"],
-    queryFn: () => axios.get("/api/plans").then((r) => r.data),
-  });
-
-  const plans: Plan[] = data?.plans ?? [];
-
+// ─── Final CTA ────────────────────────────────────────────────────────────────
+function FinalCTA({ isLoggedIn, dashHref, dashLabel }: NavProps) {
   return (
-    <section id="pricing" className="py-24" style={{ background: "#f8fafc" }}>
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="text-center mb-10">
-          <p className="text-sm font-semibold uppercase tracking-widest mb-3" style={{ color: "#25D366" }}>Pricing</p>
-          <h2 className="text-4xl font-extrabold text-slate-900">Simple, transparent pricing</h2>
-          <p className="text-lg text-slate-500 mt-3">No hidden fees. Cancel anytime.</p>
-
-          <div className="flex items-center justify-center gap-4 mt-6">
-            <span className={cn("text-sm font-medium", !annual ? "text-slate-900" : "text-slate-400")}>Monthly</span>
-            <button
-              onClick={() => setAnnual(!annual)}
-              className="relative inline-flex h-6 w-12 rounded-full transition-colors"
-              style={{ background: annual ? "#25D366" : "#cbd5e1" }}
-            >
-              <span className={cn("inline-block w-5 h-5 bg-white rounded-full shadow transform transition-transform mt-0.5",
-                annual ? "translate-x-6 ml-0.5" : "translate-x-0.5")} />
-            </button>
-            <span className={cn("text-sm font-medium", annual ? "text-slate-900" : "text-slate-400")}>
-              Annual
-              <span className="ml-1.5 px-1.5 py-0.5 text-xs font-semibold text-white rounded-full" style={{ background: "#25D366" }}>
-                Save 20%
-              </span>
-            </span>
+    <section aria-labelledby="cta-title" className="bg-white px-4 pb-20 sm:px-6 sm:pb-24 lg:px-8">
+      <div className="relative mx-auto max-w-6xl overflow-hidden rounded-[2rem] bg-slate-950 px-6 py-14 sm:px-12 sm:py-16 lg:px-16">
+        <div aria-hidden className="pointer-events-none absolute -left-20 -top-24 h-80 w-80 rounded-full bg-[#25D366]/25 blur-3xl" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-24 right-10 h-72 w-72 rounded-full bg-sky-500/15 blur-3xl" />
+        <div className="relative grid items-center gap-10 lg:grid-cols-[1.4fr_1fr]">
+          <div className="text-center lg:text-left">
+            <h2 id="cta-title" className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
+              {isLoggedIn ? "Welcome back to ChatFlow" : "Your customers are already on WhatsApp. Are you?"}
+            </h2>
+            <p className="mt-4 text-base sm:text-lg text-slate-300">
+              {isLoggedIn
+                ? "Your inbox, broadcasts and bots are waiting. Pick up where you left off."
+                : "Join 8,000+ Indian businesses replying faster and selling more with ChatFlow."}
+            </p>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center lg:justify-start">
+              {isLoggedIn ? (
+                <Link href={dashHref} className={cn(btnPrimary, "px-7 py-4 text-base")}>
+                  <Icon name="rocket_launch" className="w-5 h-5" /> {dashLabel}
+                </Link>
+              ) : (
+                <>
+                  <Link href="/register" className={cn(btnPrimary, "px-7 py-4 text-base")}>
+                    Start free trial <Icon name="arrow_forward" className="w-5 h-5" />
+                  </Link>
+                  <Link href="/login" className={cn(btnGhostDark, "px-7 py-4 text-base")}>
+                    I already have an account
+                  </Link>
+                </>
+              )}
+            </div>
           </div>
-        </div>
-
-        {isLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[1,2,3].map(i => (
-              <div key={i} className="bg-white rounded-2xl border p-8 animate-pulse h-96" style={{ borderColor: "#e2e8f0" }}>
-                <div className="h-5 bg-slate-100 rounded w-1/3 mb-4" />
-                <div className="h-12 bg-slate-100 rounded w-1/2 mb-6" />
-                <div className="space-y-3">
-                  {[1,2,3,4].map(j => <div key={j} className="h-4 bg-slate-100 rounded" />)}
-                </div>
-              </div>
+          <ul className="grid gap-3">
+            {[
+              { icon: "timer", t: "Set up in under 10 minutes" },
+              { icon: "support_agent", t: "Onboarding help from our team" },
+              { icon: "lock", t: "Official Meta API · secure by design" },
+            ].map((x) => (
+              <li key={x.t} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3.5 text-sm font-medium text-slate-200 backdrop-blur-md">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#25D366]/15 text-[#25D366]">
+                  <Icon name={x.icon} className="w-5 h-5" />
+                </span>
+                {x.t}
+              </li>
             ))}
-          </div>
-        ) : plans.length === 0 ? (
-          <div className="text-center py-16 text-slate-400">
-            <p className="text-lg font-medium">Pricing plans coming soon</p>
-            <p className="text-sm mt-1">Contact us for custom pricing</p>
-          </div>
-        ) : (
-          <div className={cn("grid gap-6", plans.length === 1 ? "max-w-sm mx-auto" : plans.length === 2 ? "grid-cols-1 md:grid-cols-2 max-w-3xl mx-auto" : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3")}>
-            {plans.map((plan) => {
-              const price = annual ? plan.annualPrice : plan.monthlyPrice;
-              const sym = CURRENCY_SYMBOL[plan.currency] ?? "$";
-              return (
-                <div
-                  key={plan.id}
-                  className={cn("relative bg-white rounded-2xl border flex flex-col overflow-hidden transition-shadow hover:shadow-xl",
-                    plan.isPopular ? "border-2 shadow-lg" : ""
-                  )}
-                  style={{ borderColor: plan.isPopular ? "#25D366" : "#e2e8f0" }}
-                >
-                  {plan.isPopular && (
-                    <div className="text-center py-2 text-xs font-bold text-white" style={{ background: "#25D366" }}>
-                      MOST POPULAR
-                    </div>
-                  )}
-
-                  <div className="p-8 flex flex-col flex-1">
-                    <h3 className="text-xl font-bold text-slate-900">{plan.name}</h3>
-                    {plan.description && <p className="text-sm text-slate-500 mt-1">{plan.description}</p>}
-
-                    <div className="my-6">
-                      <span className="text-5xl font-extrabold text-slate-900">{sym}{price}</span>
-                      <span className="text-slate-400 text-sm ml-1">/ {annual ? "year" : "month"}</span>
-                      {annual && plan.monthlyPrice > 0 && (
-                        <p className="text-xs text-green-600 mt-1 font-medium">
-                          Save {sym}{Math.round((plan.monthlyPrice * 12) - plan.annualPrice)} vs monthly
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 mb-6">
-                      {[
-                        { label: "Users", val: plan.maxUsers },
-                        { label: "WA Numbers", val: plan.maxWhatsappNumbers },
-                        { label: "Broadcasts/mo", val: plan.maxBroadcasts >= 999999 ? "Unlimited" : plan.maxBroadcasts.toLocaleString() },
-                        { label: "Automations", val: plan.maxAutomations.toLocaleString() },
-                        { label: "API Calls/mo", val: plan.maxApiCalls >= 1000000 ? `${(plan.maxApiCalls/1000).toFixed(0)}K` : plan.maxApiCalls.toLocaleString() },
-                        { label: "AI Credits/mo", val: plan.maxAiCredits },
-                      ].map((s) => (
-                        <div key={s.label} className="text-xs p-2 bg-slate-50 rounded-lg">
-                          <span className="text-slate-400 block">{s.label}</span>
-                          <span className="font-semibold text-slate-800">{s.val}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    {plan.features.length > 0 && (
-                      <ul className="space-y-2.5 mb-6 flex-1">
-                        {plan.features.map((f, i) => (
-                          <li key={i} className="flex items-start gap-2.5 text-sm text-slate-600">
-                            <Icon name={"check"} className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "#25D366" }} />
-                            {f}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-
-                    <Link
-                      href={isLoggedIn ? "/settings?tab=billing" : "/register"}
-                      className={cn("mt-auto block text-center py-3 rounded-xl text-sm font-bold transition-all",
-                        plan.isPopular ? "text-white hover:brightness-110" : "border-2 text-slate-700 hover:bg-slate-50"
-                      )}
-                      style={plan.isPopular ? { background: "#25D366" } : { borderColor: "#e2e8f0" }}
-                    >
-                      {isLoggedIn
-                        ? "Select Plan"
-                        : price === 0
-                          ? "Get Started Free"
-                          : "Start Free Trial"}
-                    </Link>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        <p className="text-center text-sm text-slate-400 mt-8">
-          All plans include 14-day free trial · No credit card required · Cancel anytime
-        </p>
-      </div>
-    </section>
-  );
-}
-
-// ─── Testimonials ─────────────────────────────────────────────────────────────
-function Testimonials() {
-  return (
-    <section className="py-24 bg-white">
-      <div className="max-w-6xl mx-auto px-6">
-        <div className="text-center mb-14">
-          <p className="text-sm font-semibold uppercase tracking-widest mb-3" style={{ color: "#25D366" }}>Testimonials</p>
-          <h2 className="text-4xl font-extrabold text-slate-900">Loved by businesses worldwide</h2>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {TESTIMONIALS.map((t) => (
-            <div key={t.name} className="bg-slate-50 rounded-2xl p-7 flex flex-col gap-4 border" style={{ borderColor: "#e2e8f0" }}>
-              <div className="flex gap-0.5">
-                {Array.from({ length: t.rating }).map((_, i) => (
-                  <Icon key={i} name={"star"} className="w-4 h-4" style={{ color: "#f59e0b" }} />
-                ))}
-              </div>
-              <p className="text-sm text-slate-600 leading-relaxed flex-1">"{t.text}"</p>
-              <div>
-                <p className="text-sm font-bold text-slate-900">{t.name}</p>
-                <p className="text-xs text-slate-400">{t.role}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ─── Trust badges ─────────────────────────────────────────────────────────────
-function TrustBadges() {
-  const badges = [
-    { icon: "shield",  label: "SOC 2 Compliant" },
-    { icon: "lock",    label: "End-to-End Encrypted" },
-    { icon: "language",   label: "GDPR Ready" },
-    { icon: "support_agent", label: "24/7 Support" },
-    { icon: "group",   label: "99.9% Uptime SLA" },
-  ];
-  return (
-    <section className="py-12 border-t border-b" style={{ background: "#f8fafc", borderColor: "#e2e8f0" }}>
-      <div className="max-w-5xl mx-auto px-6 flex flex-wrap items-center justify-center gap-8">
-        {badges.map((b) => (
-          <div key={b.label} className="flex items-center gap-2 text-sm font-medium text-slate-600">
-            <Icon name={b.icon} className="w-4 h-4" style={{ color: "#25D366" }} />
-            {b.label}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-// ─── CTA ──────────────────────────────────────────────────────────────────────
-function CTA({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: string }) {
-  return (
-    <section className="py-24" style={{ background: "#0b1d14" }}>
-      <div className="max-w-3xl mx-auto px-6 text-center">
-        <h2 className="text-4xl font-extrabold text-white mb-4">
-          {isLoggedIn ? "Welcome back to ChatFlow!" : "Ready to grow your business on WhatsApp?"}
-        </h2>
-        <p className="text-lg text-white/50 mb-10">
-          {isLoggedIn
-            ? "Your dashboard is ready. Pick up where you left off."
-            : "Join 10,000+ businesses already using ChatFlow to connect with their customers."}
-        </p>
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          {isLoggedIn ? (
-            <Link
-              href={dashHref}
-              className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-bold text-white transition-all hover:brightness-110"
-              style={{ background: "#25D366", boxShadow: "0 0 30px #25D36640" }}
-            >
-              <Icon name={"rocket_launch"} className="w-4 h-4" />
-              Go to Dashboard
-            </Link>
-          ) : (
-            <>
-              <Link
-                href="/register"
-                className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-bold text-white transition-all hover:brightness-110"
-                style={{ background: "#25D366", boxShadow: "0 0 30px #25D36640" }}
-              >
-                Start Free Trial
-                <Icon name={"arrow_forward"} className="w-4 h-4" />
-              </Link>
-              <Link
-                href="/login"
-                className="px-8 py-4 rounded-2xl text-base font-semibold text-white/70 border border-white/20 hover:bg-white/10 transition-all"
-              >
-                Already have an account?
-              </Link>
-            </>
-          )}
+          </ul>
         </div>
       </div>
     </section>
@@ -679,55 +585,87 @@ function CTA({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: string }
 }
 
 // ─── Footer ───────────────────────────────────────────────────────────────────
-function Footer() {
+function Footer({ year, isLoggedIn, dashHref, dashLabel }: NavProps & { year: number }) {
+  const account: [string, string][] = isLoggedIn
+    ? [[dashLabel, dashHref]]
+    : [["Login", "/login"], ["Create account", "/register"], ["Forgot password", "/forgot-password"]];
   return (
-    <footer style={{ background: "#060f0a" }}>
-      <div className="max-w-7xl mx-auto px-6 py-14 grid grid-cols-1 md:grid-cols-4 gap-10">
-        <div className="md:col-span-2">
-          <div className="flex items-center gap-2.5 mb-4">
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#25D366" }}>
-              <svg viewBox="0 0 24 24" fill="white" className="w-5 h-5">
-                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
-              </svg>
-            </div>
-            <span className="font-bold text-lg text-white">ChatFlow</span>
-          </div>
-          <p className="text-sm text-white/40 leading-relaxed max-w-xs">
-            The complete WhatsApp Business Platform for modern teams. Inbox, campaigns, automation, and analytics in one place.
+    <footer className="bg-slate-950 text-slate-300">
+      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-14 sm:grid-cols-2 sm:px-6 lg:grid-cols-[2fr_1fr_1fr_1fr] lg:px-8">
+        <div>
+          <Logo />
+          <p className="mt-4 max-w-xs text-sm leading-relaxed text-slate-400">
+            The WhatsApp Business platform for Indian teams — shared inbox, broadcasts, chatbots and analytics in one place.
           </p>
         </div>
-
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-white/30 mb-4">Product</p>
-          <ul className="space-y-2.5">
-            {["Features","Pricing","How It Works","API Docs","Changelog"].map((l) => (
-              <li key={l}>
-                <a href="#" className="text-sm text-white/50 hover:text-white transition-colors">{l}</a>
-              </li>
+        <nav aria-label="Product">
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Product</p>
+          <ul className="mt-4 space-y-2.5 text-sm">
+            {NAV_LINKS.map((l) => (
+              <li key={l.href}><a href={l.href} className={cn("rounded hover:text-white", FOCUS, "focus-visible:ring-offset-slate-950")}>{l.label}</a></li>
             ))}
           </ul>
-        </div>
-
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-white/30 mb-4">Account</p>
-          <ul className="space-y-2.5">
-            {[["Login","/login"],["Register","/register"],["Forgot Password","/forgot-password"]].map(([l,h]) => (
-              <li key={l}>
-                <Link href={h} className="text-sm text-white/50 hover:text-white transition-colors">{l}</Link>
-              </li>
+        </nav>
+        <nav aria-label="Industries">
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Industries</p>
+          <ul className="mt-4 space-y-2.5 text-sm">
+            {USE_CASES.map((u) => (
+              <li key={u.id}><a href="#use-cases" className={cn("rounded hover:text-white", FOCUS, "focus-visible:ring-offset-slate-950")}>{u.label}</a></li>
             ))}
           </ul>
+        </nav>
+        <nav aria-label="Account">
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Account</p>
+          <ul className="mt-4 space-y-2.5 text-sm">
+            {account.map(([l, h]) => (
+              <li key={h}><Link href={h} className={cn("rounded hover:text-white", FOCUS, "focus-visible:ring-offset-slate-950")}>{l}</Link></li>
+            ))}
+          </ul>
+        </nav>
+      </div>
+      <div className="border-t border-white/10">
+        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-2 px-4 py-6 text-xs text-slate-500 sm:flex-row sm:px-6 lg:px-8">
+          <p>© {year} ChatFlow. All rights reserved.</p>
+          <p>Built on the official WhatsApp Business API · Made for Indian businesses</p>
         </div>
       </div>
-
-      <div className="border-t max-w-7xl mx-auto px-6 py-5 flex flex-col sm:flex-row items-center justify-between gap-2"
-        style={{ borderColor: "#ffffff10" }}>
-        <p className="text-xs text-white/25">© {new Date().getFullYear()} ChatFlow. All rights reserved.</p>
-        <p className="text-xs text-white/25">Built on Meta WhatsApp Business API</p>
-      </div>
-      {/* Space for mobile bottom nav */}
-      <div className="md:hidden h-16" />
     </footer>
+  );
+}
+
+// ─── Mobile sticky CTA (appears after scrolling past the hero) ────────────────
+function MobileStickyCTA({ isLoggedIn, dashHref, dashLabel }: NavProps) {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setShow(window.scrollY > 700);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  return (
+    <div
+      aria-hidden={!show}
+      className={cn(
+        "md:hidden fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-slate-950/95 px-4 py-3 backdrop-blur-xl transition-transform duration-300 motion-reduce:transition-none",
+        "pb-[max(0.75rem,env(safe-area-inset-bottom))]",
+        show ? "translate-y-0" : "translate-y-full"
+      )}
+    >
+      <div className="flex gap-2.5">
+        {isLoggedIn ? (
+          <Link href={dashHref} tabIndex={show ? 0 : -1} className={cn(btnPrimary, "flex-1 rounded-xl py-3 text-sm")}>
+            {dashLabel} <Icon name="arrow_forward" className="w-4 h-4" />
+          </Link>
+        ) : (
+          <>
+            <Link href="/login" tabIndex={show ? 0 : -1} className={cn(btnGhostDark, "rounded-xl px-5 py-3 text-sm")}>Login</Link>
+            <Link href="/register" tabIndex={show ? 0 : -1} className={cn(btnPrimary, "flex-1 rounded-xl py-3 text-sm")}>
+              Start free trial <Icon name="arrow_forward" className="w-4 h-4" />
+            </Link>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -735,24 +673,36 @@ function Footer() {
 export default function LandingPage({
   isLoggedIn = false,
   isSuperAdmin = false,
+  year,
 }: {
   isLoggedIn?: boolean;
   isSuperAdmin?: boolean;
+  /** Computed on the server so render stays pure. */
+  year: number;
 }) {
   const dashHref = isSuperAdmin ? "/admin" : "/dashboard";
+  const dashLabel = isSuperAdmin ? "Open admin panel" : "Go to dashboard";
+  const nav = { isLoggedIn, dashHref, dashLabel };
+
   return (
-    <div className="min-h-screen">
-      <Navbar isLoggedIn={isLoggedIn} dashHref={dashHref} />
-      <Hero isLoggedIn={isLoggedIn} dashHref={dashHref} />
-      <Stats />
-      <Features />
-      <HowItWorks />
-      <Testimonials />
-      <TrustBadges />
-      <Pricing isLoggedIn={isLoggedIn} />
-      <CTA isLoggedIn={isLoggedIn} dashHref={dashHref} />
-      <Footer />
-      <MobileBottomNav isLoggedIn={isLoggedIn} dashHref={dashHref} />
+    <div className="min-h-dvh overflow-x-clip bg-white">
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-lg focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-slate-900">
+        Skip to content
+      </a>
+      <Navbar {...nav} />
+      <main id="main">
+        <Hero {...nav} />
+        <TrustStrip />
+        <Features />
+        <HowItWorks />
+        <UseCases />
+        <Pricing isLoggedIn={isLoggedIn} />
+        <FAQ />
+        <FinalCTA {...nav} />
+      </main>
+      <Footer {...nav} year={year} />
+      <div className="h-16 bg-slate-950 md:hidden" aria-hidden />
+      <MobileStickyCTA {...nav} />
     </div>
   );
 }

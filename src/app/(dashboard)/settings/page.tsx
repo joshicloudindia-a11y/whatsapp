@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/ui/icon";
 import { WhatsAppSettings } from "@/components/settings/whatsapp-settings";
@@ -11,27 +10,28 @@ import { ProfileSettings } from "@/components/settings/profile-settings";
 import { OrganizationSettings } from "@/components/settings/organization-settings";
 import { TeamSettings } from "@/components/settings/team-settings";
 import { SubscriptionSettings } from "@/components/settings/subscription-settings";
+import { TeamsSettings } from "@/components/settings/teams-settings";
+import { DevelopersSettings } from "@/components/settings/developers-settings";
 
-type Tab = "profile" | "organization" | "team" | "whatsapp" | "api-keys" | "billing";
+type Tab = "profile" | "organization" | "team" | "teams" | "whatsapp" | "api-keys" | "developers" | "billing";
 
 export default function SettingsPage() {
   const searchParams = useSearchParams();
-  const initialTab = (searchParams.get("tab") as Tab | null) ?? "profile";
-  const [tab, setTab] = useState<Tab>(initialTab);
+  const router = useRouter();
+  // The URL is the single source of truth for the active tab (deep links like ?tab=billing just work).
+  const tab = ((searchParams.get("tab") as Tab | null) ?? "profile");
+  const setTab = (t: Tab) => router.replace(`/settings?tab=${t}`, { scroll: false });
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === "ADMIN";
-
-  useEffect(() => {
-    const t = searchParams.get("tab") as Tab | null;
-    if (t) setTab(t);
-  }, [searchParams]);
 
   const tabs: { id: Tab; label: string; icon: string; adminOnly?: boolean }[] = [
     { id: "profile",      label: "My Profile",      icon: "person" },
     { id: "organization", label: "Organization",    icon: "apartment" },
     { id: "team",         label: "Team",            icon: "group" },
+    { id: "teams",        label: "Teams",           icon: "groups" },
     { id: "whatsapp",     label: "WhatsApp",        icon: "smartphone" },
     { id: "api-keys",     label: "API Keys",        icon: "key", adminOnly: true },
+    { id: "developers",   label: "Developers",      icon: "code", adminOnly: true },
     { id: "billing",      label: "My Subscription", icon: "credit_card" },
   ];
 
@@ -43,7 +43,7 @@ export default function SettingsPage() {
           .map((t) => (
             <button
               key={t.id}
-              onClick={() => { setTab(t.id); window.history.replaceState(null, "", `/settings?tab=${t.id}`); }}
+              onClick={() => setTab(t.id)}
               className={cn(
                 "shrink-0 md:w-full whitespace-nowrap text-left px-3 py-2 rounded-xl text-sm font-medium transition-colors inline-flex md:flex items-center gap-2.5",
                 tab === t.id ? "bg-green-50 text-green-700" : "text-slate-600 hover:bg-slate-50"
@@ -59,8 +59,10 @@ export default function SettingsPage() {
         {tab === "profile"      && <ProfileSettings />}
         {tab === "organization" && <OrganizationSettings />}
         {tab === "team"         && <TeamSettings />}
+        {tab === "teams"        && <TeamsSettings />}
         {tab === "whatsapp"     && <WhatsAppSettings isAdmin={isAdmin} />}
         {tab === "api-keys"     && isAdmin && <ApiKeysSettings />}
+        {tab === "developers"   && isAdmin && <DevelopersSettings />}
         {tab === "billing"      && <SubscriptionSettings />}
       </div>
     </div>

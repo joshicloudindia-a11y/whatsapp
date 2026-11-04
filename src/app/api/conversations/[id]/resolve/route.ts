@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
+import { emitConversationResolved } from "@/lib/outgoing-webhooks";
 import type { ConversationStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireOrgMember } from "@/lib/org-auth";
@@ -17,5 +18,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!conv) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const conversation = await prisma.conversation.update({ where: { id }, data: { status }, select: { id: true, status: true } });
+  if (status === "RESOLVED") after(() => emitConversationResolved(id, member.userId)); // [webhooks]
   return NextResponse.json({ success: true, conversation });
 }

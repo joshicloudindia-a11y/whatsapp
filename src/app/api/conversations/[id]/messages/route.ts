@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
+import { emitMessageSent } from "@/lib/outgoing-webhooks";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -56,6 +57,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
     if (type === "template" && !templateName) {
       return NextResponse.json({ error: "Choose a template" }, { status: 400 });
+    }
+    // [compliance] Contact replied STOP – nothing may be sent until they reply START.
+    if (contact.optedOut) {
+      return NextResponse.json({ error: "This contact unsubscribed (STOP). They must message START to receive messages again.", code: "OPTED_OUT" }, { status: 400 });
     }
     if (!whatsappAccount.isActive) {
       return NextResponse.json({ error: "This WhatsApp number is disabled. Enable it in Settings → WhatsApp." }, { status: 400 });
@@ -135,6 +140,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     await prisma.usageLog.create({
       data: { organizationId: session.user.organizationId, type: "MESSAGE_SENT" },
     });
+    after(() => emitMessageSent(message.id)); // [webhooks]
 
     return NextResponse.json({ message });
   } catch (error: any) {

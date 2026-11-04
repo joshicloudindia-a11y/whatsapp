@@ -169,6 +169,7 @@ export function verifyWebhookSignature(body: string, signature: string, secret: 
   return crypto.timingSafeEqual(expected, received);
 }
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- raw Meta webhook payloads; typed by the webhook route */
 export interface ParsedWebhookChange {
   messages?: any[];
   statuses?: any[];
@@ -192,6 +193,7 @@ export function parseWebhookMessage(entry: any): ParsedWebhookChange[] {
   }
   return result;
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 export interface PhoneNumberInfo {
   display_phone_number?: string;
@@ -305,4 +307,71 @@ export async function deleteMessageTemplate(wabaId: string, accessToken: string,
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.success === false) throw new Error(metaErrorMessage(data, "Could not delete the template on Meta"));
   return { success: true };
+}
+
+// ─── [media] WhatsApp-hosted media (upload / lookup / send by id) ────────────
+
+export type WaMediaKind = "image" | "video" | "audio" | "document";
+
+export interface MetaMediaInfo {
+  id: string;
+  url: string;
+  mime_type?: string;
+  file_size?: number;
+  sha256?: string;
+}
+
+/**
+ * Looks up a WhatsApp media id. Returns the short-lived download `url` (needs the
+ * same bearer token to fetch) or the raw Graph error so callers can map it.
+ */
+export async function getMediaInfo(
+  mediaId: string,
+  accessToken: string,
+  phoneNumberId?: string,
+): Promise<{ ok: true; info: MetaMediaInfo } | { ok: false; status: number; error: unknown }> {
+  const qs = phoneNumberId ? `?phone_number_id=${encodeURIComponent(phoneNumberId)}` : "";
+  const res = await fetch(`${META_API_BASE}/${encodeURIComponent(mediaId)}${qs}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data?.url) return { ok: false, status: res.status, error: data };
+  return { ok: true, info: data as MetaMediaInfo };
+}
+
+/** Uploads a file to WhatsApp's media store and returns the media id. */
+export async function uploadMedia({
+  file, filename, mimeType, accessToken, phoneNumberId,
+}: { file: Blob; filename: string; mimeType: string; accessToken: string; phoneNumberId: string }): Promise<string> {
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("type", mimeType);
+  form.append("file", new Blob([await file.arrayBuffer()], { type: mimeType }), filename);
+  const res = await fetch(`${META_API_BASE}/${encodeURIComponent(phoneNumberId)}/media`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: form,
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data?.id) throw new Error(metaErrorMessage(data, "Could not upload the file to WhatsApp"));
+  return String(data.id);
+}
+
+/** Sends a media message that references an uploaded WhatsApp media id. */
+export async function sendMediaById({
+  to, type, mediaId, caption, filename, accessToken, phoneNumberId,
+}: { to: string; type: WaMediaKind; mediaId: string; caption?: string; filename?: string; accessToken: string; phoneNumberId: string }) {
+  const mediaObj: Record<string, string> = { id: mediaId };
+  // WhatsApp does not accept captions on audio.
+  if (caption && type !== "audio") mediaObj.caption = caption;
+  if (filename && type === "document") mediaObj.filename = filename;
+  return metaPost(phoneNumberId, accessToken, {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to,
+    type,
+    [type]: mediaObj,
+  });
 }

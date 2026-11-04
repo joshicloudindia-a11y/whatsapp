@@ -84,3 +84,16 @@ body {
   user-select: none;
   font-size: 1.25em;
 }
+
+/* ── Landing ── */
+@keyframes landing-msg-in { from { opacity: 0; transform: translateY(10px) scale(.98) } to { opacity: 1; transform: none } }
+@keyframes landing-marquee { from { transform: translateX(0) } to { transform: translateX(-50%) } }
+@keyframes landing-dot { 0%, 80%, 100% { opacity: .35; transform: translateY(0) } 40% { opacity: 1; transform: translateY(-3px) } }
+@keyframes landing-fade-up { from { opacity: 0; transform: translateY(16px) } to { opacity: 1; transform: none } }
+.landing-msg { animation: landing-msg-in .5s cubic-bezier(.2,.8,.2,1) both }
+.landing-marquee { animation: landing-marquee 45s linear infinite }
+.landing-dot { animation: landing-dot 1.2s ease-in-out infinite }
+.landing-fade-up { animation: landing-fade-up .6s cubic-bezier(.2,.8,.2,1) both }
+@media (prefers-reduced-motion: reduce) {
+  .landing-msg, .landing-marquee, .landing-dot, .landing-fade-up { animation: none }
+}
