@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { parseWebhookMessage, verifyWebhookSignature } from "@/lib/whatsapp";
 import { pusherServer, PUSHER_EVENTS, orgChannel, conversationChannel } from "@/lib/pusher";
+import { applyRecipientStatus } from "@/lib/broadcast-runner";
 
 export const dynamic = "force-dynamic";
 
@@ -204,7 +205,14 @@ async function handleStatusUpdate(status: any, organizationId: string) {
     updateData.failureReason = status.errors[0].title;
   }
 
-  const result = await prisma.message.updateMany({ where: { wamid }, data: updateData });
+  // Forward-only: Meta can deliver "sent" after "delivered"/"read".
+  const allowedPrev: Record<string, string[]> = {
+    SENT: ["PENDING"], DELIVERED: ["PENDING", "SENT"], READ: ["PENDING", "SENT", "DELIVERED"], FAILED: ["PENDING", "SENT", "DELIVERED"],
+  };
+  const result = await prisma.message.updateMany({ where: { wamid, status: { in: allowedPrev[mapped] as never } }, data: updateData });
+
+  // Broadcast delivery / read statistics.
+  await applyRecipientStatus(wamid, mapped as never, new Date(Number(timestamp) * 1000 || Date.now()), status.errors?.[0]?.title);
 
   if (result.count > 0) {
     const msg = await prisma.message.findFirst({ where: { wamid } });
