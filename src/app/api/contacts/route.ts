@@ -1,81 +1,72 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { formatPhone } from "@/lib/utils";
+import { requireOrgMember } from "@/lib/org-auth";
+import { STAGES, cleanTags, isEmail, normalizePhone } from "@/components/contacts/shared";
+import { apiError, buildContactOrder, buildContactWhere, contactListSelect } from "./_lib/query";
 
+/** GET ?search&stage&tag&status&sort&page&limit → paginated, org-scoped contact list. */
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { member, response } = await requireOrgMember();
+  if (!member) return response;
 
-  const { searchParams } = req.nextUrl;
-  const search = searchParams.get("search");
-  const stage = searchParams.get("stage");
-  const tag = searchParams.get("tag");
-  const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
-  const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") ?? "50")));
-
-  const where: any = { organizationId: session.user.organizationId };
-
-  if (search) {
-    where.OR = [
-      { name: { contains: search } },
-      { phone: { contains: search } },
-      { email: { contains: search } },
-    ];
-  }
-  if (stage) where.stage = stage;
-  if (tag) where.tags = { some: { tag } };
+  const sp = req.nextUrl.searchParams;
+  const page = Math.max(1, parseInt(sp.get("page") ?? "1") || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(sp.get("limit") ?? "25") || 25));
+  const where = buildContactWhere(member.organizationId, sp);
 
   const [contacts, total] = await Promise.all([
-    prisma.contact.findMany({
-      where,
-      include: {
-        tags: true,
-        attributes: true,
-        _count: { select: { conversations: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * limit,
-      take: limit,
-    }),
+    prisma.contact.findMany({ where, select: contactListSelect, orderBy: buildContactOrder(sp), skip: (page - 1) * limit, take: limit }),
     prisma.contact.count({ where }),
   ]);
 
-  return NextResponse.json({ contacts, total, page, limit });
+  return NextResponse.json({ contacts, total, page, limit, pages: Math.max(1, Math.ceil(total / limit)) });
 }
 
+const createSchema = z.object({
+  phone: z.union([z.string(), z.number()]),
+  name: z.string().trim().max(120).optional().nullable(),
+  email: z.string().trim().max(191).optional().nullable(),
+  stage: z.enum(STAGES).optional(),
+  tags: z.array(z.string()).max(50).optional(),
+  notes: z.string().max(5000).optional().nullable(),
+  optedOut: z.boolean().optional(),
+  isBlocked: z.boolean().optional(),
+});
+
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { member, response } = await requireOrgMember();
+  if (!member) return response;
 
-  const body = await req.json();
-  const { phone, name, email, stage, tags, attributes } = body;
+  const parsed = createSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Invalid contact details" }, { status: 400 });
+  const b = parsed.data;
 
-  const cleanPhone = formatPhone(phone);
-  if (!cleanPhone) return NextResponse.json({ error: "Invalid phone number" }, { status: 400 });
+  const p = normalizePhone(b.phone);
+  if ("error" in p) return NextResponse.json({ error: p.error }, { status: 400 });
+  const email = b.email?.trim() || null;
+  if (email && !isEmail(email)) return NextResponse.json({ error: "Enter a valid email address" }, { status: 400 });
+  const tags = cleanTags(b.tags);
 
   try {
     const contact = await prisma.contact.create({
       data: {
-        organizationId: session.user.organizationId,
-        phone: cleanPhone,
-        name,
+        organizationId: member.organizationId,
+        phone: p.phone,
+        name: b.name?.trim() || null,
         email,
-        stage: stage ?? "LEAD",
-        tags: tags?.length ? { createMany: { data: tags.map((t: string) => ({ tag: t })) } } : undefined,
-        attributes: attributes?.length
-          ? { createMany: { data: attributes.map((a: any) => ({ key: a.key, value: a.value })) } }
-          : undefined,
+        stage: b.stage ?? "LEAD",
+        notes: b.notes?.trim() || null,
+        optedOut: b.optedOut ?? false,
+        isBlocked: b.isBlocked ?? false,
+        ...(tags.length > 0 && { tags: { createMany: { data: tags.map((tag) => ({ tag })), skipDuplicates: true } } }),
       },
-      include: { tags: true, attributes: true },
+      select: contactListSelect,
     });
-
     return NextResponse.json({ contact }, { status: 201 });
-  } catch (error: any) {
-    if (error.code === "P2002") {
-      return NextResponse.json({ error: "Contact with this phone already exists" }, { status: 409 });
-    }
+  } catch (e) {
+    if (apiError(e) === "P2002") return NextResponse.json({ error: `A contact with +${p.phone} already exists` }, { status: 409 });
+    console.error("[contacts] create failed", e);
     return NextResponse.json({ error: "Failed to create contact" }, { status: 500 });
   }
 }

@@ -19,7 +19,7 @@ interface ListData {
   quota: { used: number; limit: number; remaining: number | null };
   canSend: boolean;
 }
-interface Template { id: string; name: string; language: string; category: string; body: string; status: string }
+interface Template { id: string; name: string; language: string; category: string; body: string; status: string; headerType?: string | null; headerContent?: string | null; footer?: string | null; buttons?: unknown }
 interface Account { id: string; displayName: string; phoneNumber: string; isActive: boolean }
 type VarSource = { source: "name" | "phone" | "email" | "text"; value: string };
 
@@ -226,7 +226,17 @@ function CreateWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
   // Captured once when the wizard opens; used for schedule validation.
   const [openedAt] = useState(() => Date.now());
 
-  const { data: tpl } = useQuery({ queryKey: ["templates-approved"], queryFn: () => axios.get("/api/templates", { params: { status: "APPROVED" } }).then((r) => r.data.templates as Template[]) });
+  const { data: tpl, refetch: refetchTemplates } = useQuery({ queryKey: ["templates-approved"], queryFn: () => axios.get("/api/templates", { params: { status: "APPROVED" } }).then((r) => r.data.templates as Template[]) });
+  const [syncing, setSyncing] = useState(false);
+  const syncTemplates = async () => {
+    setSyncing(true);
+    try {
+      await axios.post("/api/templates/sync");
+      const r = await refetchTemplates();
+      toast.success(r.data?.length ? `${r.data.length} approved template${r.data.length === 1 ? "" : "s"} ready` : "Synced. No approved templates found on Meta yet.");
+    } catch (e) { toast.error(err(e, "Sync failed")); }
+    finally { setSyncing(false); }
+  };
   const { data: acc } = useQuery({ queryKey: ["whatsapp-accounts"], queryFn: () => axios.get("/api/settings/whatsapp").then((r) => r.data.accounts as Account[]) });
   const { data: aud, isFetching: audLoading } = useQuery({
     queryKey: ["audience", mode, tags.join(","), stage],
@@ -242,14 +252,18 @@ function CreateWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
 
   const template = tpl?.find((t) => t.id === templateId) ?? null;
   const placeholders = useMemo(() => (template ? placeholdersOf(template.body) : []), [template]);
-  const sample = aud?.sample?.[0];
-  const preview = template
-    ? placeholders.reduce((body, p, i) => {
-        const v = vars[i];
-        const val = !v ? p : v.source === "name" ? sample?.name || v.value || "Rahul" : v.source === "phone" ? sample?.phone || "919876543210" : v.source === "email" ? v.value || "email" : v.value || p;
-        return body.replaceAll(p, val);
-      }, template.body)
-    : "";
+  const [previewIdx, setPreviewIdx] = useState(0);
+  const [showMobilePreview, setShowMobilePreview] = useState(false);
+  const samples = aud?.sample ?? [];
+  const sample = samples.length ? samples[previewIdx % samples.length] : undefined;
+  const valueFor = (i: number): { text: string; missing: boolean } => {
+    const v = vars[i];
+    if (!v) return { text: placeholders[i], missing: true };
+    if (v.source === "name") return sample?.name ? { text: sample.name, missing: false } : { text: v.value || "there", missing: !v.value };
+    if (v.source === "phone") return { text: sample ? `+${sample.phone}` : "+91 98765 43210", missing: !sample };
+    if (v.source === "email") return { text: v.value || "customer@email.com", missing: true };
+    return v.value ? { text: v.value, missing: false } : { text: placeholders[i], missing: true };
+  };
 
   const pickTemplate = (id: string) => {
     setTemplateId(id);
@@ -318,7 +332,13 @@ function CreateWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
                   <div className="space-y-1.5">
                     <span className="text-xs font-semibold text-slate-600">Template</span>
                     {tpl && !tpl.length ? (
-                      <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">No approved templates yet. <a href="/templates" className="font-semibold underline">Create one</a> and wait for Meta approval.</p>
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 space-y-2">
+                        <p>No approved templates in ChatFlow yet. If you already have templates in Meta (e.g. <code>hello_world</code>), import them now, or <a href="/templates" className="font-semibold underline">create one</a> and wait for approval.</p>
+                        <button type="button" onClick={syncTemplates} disabled={syncing}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white hover:bg-amber-700 disabled:opacity-60">
+                          <Icon name="refresh" className={cn("w-3.5 h-3.5", syncing && "animate-spin")} /> {syncing ? "Syncing…" : "Sync templates from Meta"}
+                        </button>
+                      </div>
                     ) : (
                       <div className="grid gap-2 sm:grid-cols-2">
                         {tpl?.map((t) => (
@@ -432,23 +452,28 @@ function CreateWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
               )}
             </div>
 
-            {/* Live preview */}
-            <div className="hidden lg:block">
-              <p className="text-xs font-semibold text-slate-600 mb-2">Preview</p>
-              <div className="rounded-3xl border-[6px] border-slate-900 bg-[#efeae2] p-3 min-h-[260px]">
-                {template ? (
-                  <div className="rounded-2xl rounded-tl-sm bg-white px-3 py-2 shadow-sm max-w-[95%]">
-                    <p className="text-[13px] whitespace-pre-wrap leading-snug">{preview}</p>
-                    <p className="mt-1 text-right text-[10px] text-slate-400">{new Date().toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}</p>
-                  </div>
-                ) : <p className="text-xs text-slate-500 text-center mt-20">Pick a template to preview</p>}
-              </div>
+            {/* Live preview (side column on desktop, toggle on mobile) */}
+            <div className={cn("lg:block", showMobilePreview ? "block" : "hidden")}>
+              <PhonePreview
+                template={template}
+                businessName={accounts.find((a) => a.id === accountId)?.displayName ?? "Your business"}
+                valueFor={valueFor}
+                placeholders={placeholders}
+                recipients={aud?.eligible ?? null}
+                sampleName={sample ? sample.name ?? `+${sample.phone}` : null}
+                canCycle={samples.length > 1}
+                onCycle={() => setPreviewIdx((i) => i + 1)}
+              />
             </div>
           </div>
         </div>
 
         <div className="flex gap-2 px-5 py-4 border-t border-slate-100 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <button onClick={() => (step ? setStep(step - 1) : onClose())} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">{step ? "Back" : "Cancel"}</button>
+          <button onClick={() => setShowMobilePreview((v) => !v)} aria-pressed={showMobilePreview}
+            className={cn("lg:hidden inline-flex items-center gap-1.5 rounded-xl border px-3 py-2.5 text-sm font-semibold", showMobilePreview ? "border-green-500 bg-green-50 text-green-700" : "border-slate-200 text-slate-600")}>
+            <Icon name="smartphone" className="w-4 h-4" /> Preview
+          </button>
           <div className="flex-1" />
           {step < 2 ? (
             <button onClick={() => setStep(step + 1)} disabled={step === 0 ? !step0Ok : !step1Ok}
@@ -462,6 +487,115 @@ function CreateWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── WhatsApp-style phone preview ────────────────────────────────────────────
+interface PreviewButton { type?: string; text?: string }
+
+function PhonePreview({ template, businessName, valueFor, placeholders, recipients, sampleName, canCycle, onCycle }: {
+  template: Template | null; businessName: string; valueFor: (i: number) => { text: string; missing: boolean };
+  placeholders: string[]; recipients: number | null; sampleName: string | null; canCycle: boolean; onCycle: () => void;
+}) {
+  // Split the body into text + variable segments so values can be highlighted.
+  const segments = useMemo(() => {
+    if (!template) return [];
+    return template.body.split(/(\{\{\d+\}\})/g).filter(Boolean).map((part) => {
+      const idx = placeholders.indexOf(part);
+      return idx >= 0 ? { var: true as const, ...valueFor(idx) } : { var: false as const, text: part, missing: false };
+    });
+  }, [template, placeholders, valueFor]);
+
+  const buttons: PreviewButton[] = Array.isArray(template?.buttons) ? (template!.buttons as PreviewButton[]).filter((b) => b?.text).slice(0, 10) : [];
+  const btnIcon = (t?: string) => (t === "URL" ? "language" : t === "PHONE_NUMBER" ? "call" : t === "OTP" ? "content_copy" : "reply");
+  const length = template ? segments.reduce((n, s) => n + s.text.length, 0) : 0;
+  const missing = segments.filter((s) => s.var && s.missing).length;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold text-slate-600">Live preview</p>
+        {sampleName && (
+          <button type="button" onClick={onCycle} disabled={!canCycle}
+            className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-600 enabled:hover:bg-slate-50 disabled:opacity-70">
+            <Icon name="person" className="w-3 h-3" /> {sampleName} {canCycle && <Icon name="refresh" className="w-3 h-3" />}
+          </button>
+        )}
+      </div>
+
+      <div className="mx-auto w-full max-w-[280px] rounded-[2rem] border-[7px] border-slate-900 bg-slate-900 shadow-xl overflow-hidden">
+        {/* chat header */}
+        <div className="flex items-center gap-2 bg-[#075e54] px-3 py-2 text-white">
+          <Icon name="arrow_back" className="w-4 h-4 opacity-80" />
+          <span className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center text-[11px] font-bold">{businessName[0]?.toUpperCase()}</span>
+          <div className="min-w-0 flex-1 leading-tight">
+            <p className="text-[12px] font-semibold truncate flex items-center gap-1">{businessName} <Icon name="verified" filled className="w-3 h-3 text-[#25D366]" /></p>
+            <p className="text-[9px] opacity-75">Business account</p>
+          </div>
+          <Icon name="more_horiz" className="w-4 h-4 opacity-80" />
+        </div>
+
+        {/* chat body */}
+        <div className="min-h-[300px] max-h-[420px] overflow-y-auto bg-[#efeae2] [background-image:radial-gradient(#d9d3c7_1px,transparent_1px)] [background-size:16px_16px] px-2.5 py-3">
+          <div className="flex justify-center mb-2"><span className="rounded-md bg-white/90 px-2 py-0.5 text-[9px] font-semibold text-slate-500 shadow-sm">TODAY</span></div>
+          {template ? (
+            <div className="max-w-[92%]">
+              <div className="rounded-xl rounded-tl-sm bg-white shadow-sm overflow-hidden">
+                {template.headerType && template.headerType !== "TEXT" && template.headerType !== "NONE" ? (
+                  <div className="h-24 bg-slate-200 flex flex-col items-center justify-center gap-1 text-slate-500">
+                    <Icon name={template.headerType === "VIDEO" ? "videocam" : template.headerType === "DOCUMENT" ? "description" : "image"} className="w-6 h-6" />
+                    <span className="text-[9px] font-semibold uppercase">{template.headerType.toLowerCase()}</span>
+                  </div>
+                ) : null}
+                <div className="px-2.5 pt-2 pb-1.5">
+                  {template.headerContent && (template.headerType === "TEXT" || !template.headerType) && (
+                    <p className="text-[12.5px] font-bold text-slate-900 mb-1">{template.headerContent}</p>
+                  )}
+                  <p className="text-[12.5px] leading-snug text-slate-900 whitespace-pre-wrap break-words">
+                    {segments.map((sg, i) => sg.var ? (
+                      <span key={i} className={cn("rounded px-0.5 font-semibold", sg.missing ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800")}>{sg.text}</span>
+                    ) : <span key={i}>{sg.text}</span>)}
+                  </p>
+                  {template.footer && <p className="mt-1 text-[10.5px] text-slate-400">{template.footer}</p>}
+                  <p className="mt-0.5 text-right text-[9px] text-slate-400">10:42 am</p>
+                </div>
+                {buttons.length > 0 && (
+                  <div className="border-t border-slate-100 divide-y divide-slate-100">
+                    {buttons.map((b, i) => (
+                      <div key={i} className="flex items-center justify-center gap-1.5 py-1.5 text-[12px] font-medium text-[#0b93f6]">
+                        <Icon name={btnIcon(b.type)} className="w-3.5 h-3.5" /> {b.text}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-[85%] space-y-2">
+              <div className="rounded-xl rounded-tl-sm bg-white/80 p-2.5 space-y-1.5">
+                <div className="h-2 w-3/4 rounded bg-slate-200" /><div className="h-2 w-full rounded bg-slate-200" /><div className="h-2 w-1/2 rounded bg-slate-200" />
+              </div>
+              <p className="text-[11px] text-slate-500 text-center pt-6">Pick a template to see exactly what customers will receive</p>
+            </div>
+          )}
+        </div>
+
+        {/* fake composer */}
+        <div className="flex items-center gap-1.5 bg-[#f0f0f0] px-2 py-1.5">
+          <div className="flex-1 rounded-full bg-white px-3 py-1 text-[10px] text-slate-400">Message</div>
+          <span className="w-6 h-6 rounded-full bg-[#25D366] flex items-center justify-center"><Icon name="mic" className="w-3 h-3 text-white" /></span>
+        </div>
+      </div>
+
+      {template && (
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
+          <span><b className="text-slate-700">{length}</b>/1024 chars</span>
+          <span className="uppercase">{template.category.toLowerCase()} · {template.language}</span>
+          {recipients !== null && <span><b className="text-slate-700">{recipients.toLocaleString("en-IN")}</b> recipients</span>}
+          {missing > 0 && <span className="text-amber-600 font-semibold">{missing} variable{missing > 1 ? "s" : ""} need a value</span>}
+        </div>
+      )}
     </div>
   );
 }

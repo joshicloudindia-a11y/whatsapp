@@ -220,3 +220,89 @@ export async function subscribeAppToWaba(wabaId: string, accessToken: string): P
   const data = await res.json().catch(() => ({}));
   return res.ok && data?.success !== false;
 }
+
+// ─── Message template management (WhatsApp Business Management API) ──────────
+
+/** Extracts the most helpful message from a Graph API error body. */
+export function metaErrorMessage(data: unknown, fallback = "Meta API error"): string {
+  const e = (data as { error?: { message?: string; error_user_title?: string; error_user_msg?: string } })?.error;
+  if (!e) return fallback;
+  if (e.error_user_msg) return e.error_user_title ? `${e.error_user_title}: ${e.error_user_msg}` : e.error_user_msg;
+  return e.message ?? fallback;
+}
+
+export interface MetaTemplateRecord {
+  id: string;
+  name: string;
+  status: string;
+  category: string;
+  language: string;
+  rejected_reason?: string;
+  components?: Record<string, unknown>[];
+}
+
+/** Creates a template. Returns Meta's id, initial status and (possibly re-classified) category. */
+export async function createMessageTemplate(
+  wabaId: string,
+  accessToken: string,
+  template: { name: string; category: string; language: string; components: object[] }
+): Promise<{ id: string; status?: string; category?: string }> {
+  const res = await fetch(`${META_API_BASE}/${encodeURIComponent(wabaId)}/message_templates`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(template),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data?.id) throw new Error(metaErrorMessage(data, "Template submission failed"));
+  return data;
+}
+
+/** Edits an existing template (allowed for rejected/paused, and approved within Meta's edit limits). */
+export async function editMessageTemplate(
+  templateId: string,
+  accessToken: string,
+  update: { category?: string; components: object[] }
+): Promise<{ success: boolean }> {
+  const res = await fetch(`${META_API_BASE}/${encodeURIComponent(templateId)}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(update),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.success === false) throw new Error(metaErrorMessage(data, "Template update failed"));
+  return { success: true };
+}
+
+/** Lists every template on a WABA, following pagination (capped to avoid runaway loops). */
+export async function listMessageTemplates(wabaId: string, accessToken: string, maxPages = 20): Promise<MetaTemplateRecord[]> {
+  const out: MetaTemplateRecord[] = [];
+  let url: string | null =
+    `${META_API_BASE}/${encodeURIComponent(wabaId)}/message_templates?fields=name,status,category,language,components,id,rejected_reason&limit=100`;
+  for (let page = 0; url && page < maxPages; page++) {
+    const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(metaErrorMessage(data, "Could not fetch templates from Meta"));
+    out.push(...((data?.data ?? []) as MetaTemplateRecord[]));
+    url = typeof data?.paging?.next === "string" ? data.paging.next : null;
+  }
+  return out;
+}
+
+/**
+ * Deletes a template on Meta. With `hsmId` only that language version is deleted;
+ * by name alone Meta deletes every language of the template.
+ */
+export async function deleteMessageTemplate(wabaId: string, accessToken: string, name: string, hsmId?: string | null) {
+  const qs = new URLSearchParams({ name });
+  if (hsmId) qs.set("hsm_id", hsmId);
+  const res = await fetch(`${META_API_BASE}/${encodeURIComponent(wabaId)}/message_templates?${qs}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.success === false) throw new Error(metaErrorMessage(data, "Could not delete the template on Meta"));
+  return { success: true };
+}

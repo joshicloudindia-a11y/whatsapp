@@ -1,91 +1,78 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import type { Prisma, TemplateCategory, TemplateStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { submitTemplate } from "@/lib/whatsapp";
+import { requireOrgMember } from "@/lib/org-auth";
+import { TEMPLATE_CATEGORIES, TEMPLATE_STATUSES, coerceDraft, draftToColumns, validateDraft } from "@/components/templates/template-utils";
+import { activeAccounts, canManage, distinctWabas, duplicateNameResponse, forbidden, isUniqueViolation, submitToMeta, templateSelect } from "./_lib";
 
+export const maxDuration = 60;
+
+/** GET ?status=&category=&search= — list templates plus org-wide counts. */
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { member, response } = await requireOrgMember();
+  if (!member) return response;
+  const organizationId = member.organizationId;
+  const sp = req.nextUrl.searchParams;
+  const status = sp.get("status")?.toUpperCase();
+  const category = sp.get("category")?.toUpperCase();
+  const search = (sp.get("search") ?? "").trim().slice(0, 100);
 
-  const { searchParams } = req.nextUrl;
-  const status = searchParams.get("status");
-  const category = searchParams.get("category");
+  const where: Prisma.MessageTemplateWhereInput = { organizationId };
+  if (status && (TEMPLATE_STATUSES as readonly string[]).includes(status)) where.status = status as TemplateStatus;
+  else where.status = { not: "DELETED" };
+  if (category && (TEMPLATE_CATEGORIES as readonly string[]).includes(category)) where.category = category as TemplateCategory;
 
-  const where: any = { organizationId: session.user.organizationId };
-  if (status) where.status = status;
-  if (category) where.category = category;
+  const [all, byStatus, byCategory, accounts] = await Promise.all([
+    prisma.messageTemplate.findMany({ where, select: templateSelect, orderBy: [{ updatedAt: "desc" }], take: 500 }),
+    prisma.messageTemplate.groupBy({ by: ["status"], where: { organizationId }, _count: { _all: true } }),
+    prisma.messageTemplate.groupBy({ by: ["category"], where: { organizationId, status: { not: "DELETED" } }, _count: { _all: true } }),
+    activeAccounts(organizationId),
+  ]);
 
-  const templates = await prisma.messageTemplate.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
+  // Filter in JS: TiDB's default utf8mb4_bin collation makes SQL LIKE case-sensitive.
+  const q = search.toLowerCase();
+  const templates = q
+    ? all.filter((t) => t.name.toLowerCase().includes(q) || t.body.toLowerCase().includes(q) || (t.headerContent ?? "").toLowerCase().includes(q))
+    : all;
+
+  const statusCounts = Object.fromEntries(TEMPLATE_STATUSES.map((s) => [s, byStatus.find((b) => b.status === s)?._count._all ?? 0]));
+  return NextResponse.json({
+    templates,
+    counts: {
+      total: Object.entries(statusCounts).reduce((n, [s, c]) => (s === "DELETED" ? n : n + c), 0),
+      status: statusCounts,
+      category: Object.fromEntries(TEMPLATE_CATEGORIES.map((c) => [c, byCategory.find((b) => b.category === c)?._count._all ?? 0])),
+    },
+    accounts: distinctWabas(accounts).map((a) => ({ id: a.id, displayName: a.displayName, phoneNumber: a.phoneNumber })),
+    canManage: canManage(member.role),
   });
-
-  return NextResponse.json({ templates });
 }
 
+/** POST { ...draft, submit?: boolean, accountId?: string } — create (and optionally submit to Meta). */
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { member, response } = await requireOrgMember();
+  if (!member) return response;
+  if (!canManage(member.role)) return forbidden();
 
-  const body = await req.json();
-  const { name, category, language, headerType, headerContent, body: templateBody, footer, buttons, submit } = body;
+  const raw = await req.json().catch(() => null);
+  if (!raw || typeof raw !== "object") return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+  const draft = coerceDraft(raw);
+  const invalid = validateDraft(draft);
+  if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
 
-  const org = await prisma.organization.findUnique({
-    where: { id: session.user.organizationId },
-    include: { whatsappAccounts: { where: { isActive: true }, take: 1 } },
-  });
-
-  const template = await prisma.messageTemplate.create({
-    data: {
-      organizationId: session.user.organizationId,
-      name,
-      category,
-      language: language ?? "en",
-      status: "DRAFT",
-      headerType,
-      headerContent,
-      body: templateBody,
-      footer,
-      buttons,
-    },
-  });
-
-  // Submit to Meta if requested
-  if (submit && org?.whatsappAccounts[0]) {
-    try {
-      const waAccount = org.whatsappAccounts[0];
-      const components: object[] = [];
-
-      if (headerType && headerContent) {
-        components.push({ type: "HEADER", format: headerType.toUpperCase(), text: headerContent });
-      }
-      components.push({ type: "BODY", text: templateBody });
-      if (footer) components.push({ type: "FOOTER", text: footer });
-      if (buttons?.length) components.push({ type: "BUTTONS", buttons });
-
-      const result = await submitTemplate(waAccount.wabaId, waAccount.accessToken, {
-        name,
-        category: category.toUpperCase(),
-        language,
-        components,
-      });
-
-      await prisma.messageTemplate.update({
-        where: { id: template.id },
-        data: {
-          status: "PENDING",
-          metaTemplateId: result.id,
-          submittedAt: new Date(),
-        },
-      });
-    } catch (error: any) {
-      await prisma.messageTemplate.update({
-        where: { id: template.id },
-        data: { status: "REJECTED", rejectionReason: error.message },
-      });
-    }
+  let template;
+  try {
+    template = await prisma.messageTemplate.create({
+      data: { organizationId: member.organizationId, status: "DRAFT", ...draftToColumns(draft) },
+    });
+  } catch (e) {
+    if (isUniqueViolation(e)) return duplicateNameResponse();
+    throw e;
   }
 
-  return NextResponse.json({ template }, { status: 201 });
+  if (raw.submit === true) {
+    const r = await submitToMeta(template, draft, member.organizationId, typeof raw.accountId === "string" ? raw.accountId : null);
+    return NextResponse.json({ template: r.template, submitted: !r.error, submitError: r.error }, { status: 201 });
+  }
+  return NextResponse.json({ template, submitted: false }, { status: 201 });
 }

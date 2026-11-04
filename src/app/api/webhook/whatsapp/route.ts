@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { parseWebhookMessage, verifyWebhookSignature } from "@/lib/whatsapp";
 import { pusherServer, PUSHER_EVENTS, orgChannel, conversationChannel } from "@/lib/pusher";
 import { applyRecipientStatus } from "@/lib/broadcast-runner";
+import { runChatbotForInbound } from "@/lib/chatbot-runtime"; // [chatbot]
+import { runInboundAutomations } from "@/lib/automation-runtime"; // [automation]
 
 export const dynamic = "force-dynamic";
 
@@ -188,6 +190,12 @@ async function handleInboundMessage(msg: any, waAccount: any, contacts: any[]) {
   await prisma.usageLog.create({
     data: { organizationId: waAccount.organizationId, type: "MESSAGE_RECEIVED" },
   });
+
+  // [chatbot] Run any active chatbot flow for this message (src/lib/chatbot-runtime.ts). Never throws.
+  await runChatbotForInbound({ msg, waAccount, contactId: contact.id, conversationId: conversation.id });
+
+  // [automation] Rule-based automations. Keep this AFTER any chatbot call: bots answer keywords first, automations skip their text reply if a bot already replied. Never throws.
+  await runInboundAutomations({ organizationId: waAccount.organizationId, whatsappAccount: waAccount, contactId: contact.id, conversationId: conversation.id, messageId: message.id, text: content });
 }
 
 async function handleStatusUpdate(status: any, organizationId: string) {
