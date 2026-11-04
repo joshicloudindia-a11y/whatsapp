@@ -91,7 +91,7 @@ function VoiceMenu({ conversationId, contact, onClose, onVideo }: { conversation
   const qc = useQueryClient();
   const status = useCallingStatus(conversationId, true);
   const session = useCallSession();
-  const [busy, setBusy] = useState<null | "call" | "perm" | "recheck">(null);
+  const [busy, setBusy] = useState<null | "call" | "perm" | "recheck" | "enable">(null);
   const digits = contact.phone.replace(/\D/g, "");
   const name = contact.name || `+${digits}`;
   const onCall = !!session && session.phase !== "ended";
@@ -138,6 +138,20 @@ function VoiceMenu({ conversationId, contact, onClose, onVideo }: { conversation
     }
   };
 
+  const enableCalling = async (accountId: string) => {
+    setBusy("enable");
+    try {
+      await axios.patch("/api/calls/settings", { whatsappAccountId: accountId, status: "ENABLED" });
+      const r = await axios.get("/api/calls/status", { params: { conversationId, fresh: 1 } });
+      qc.setQueryData(["call-status", conversationId], r.data);
+      toast.success(r.data?.calling?.enabled ? "WhatsApp calling is now enabled for this number" : "Request sent to Meta. It can take a few minutes to apply.");
+    } catch (e) {
+      toast.error(apiErr(e, "Meta didn't allow enabling calling for this number"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const logPhone = () => {
     onClose();
     axios.post("/api/calls/log", { conversationId, via: "phone" }).then(refreshThread).catch((e) => toast.error(apiErr(e, "Couldn't log the call")));
@@ -158,6 +172,12 @@ function VoiceMenu({ conversationId, contact, onClose, onVideo }: { conversation
         <div className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900 space-y-1.5">
           <p className="font-semibold flex items-center gap-1.5"><Icon name="warning" className="w-4 h-4" /> WhatsApp calling isn&apos;t enabled for this number</p>
           {d.calling.reason && <p className="text-amber-800 break-words">Meta: {d.calling.reason}</p>}
+          {d.canManageCalling && d.whatsappAccountId && (
+            <button type="button" onClick={() => enableCalling(d.whatsappAccountId!)} disabled={busy === "enable"}
+              className="mt-1 inline-flex items-center gap-1.5 rounded-lg bg-[#25D366] px-3 py-1.5 font-semibold text-white hover:bg-[#1fb857] disabled:opacity-60">
+              <Icon name="call" className="w-3.5 h-3.5" /> {busy === "enable" ? "Enabling…" : "Enable WhatsApp calling"}
+            </button>
+          )}
           <div className="flex flex-wrap items-center gap-3 pt-0.5">
             <a href={d.calling.docsUrl || ENABLE_HELP_URL} target="_blank" rel="noreferrer" className="font-semibold text-amber-900 underline">How to enable calling</a>
             <button type="button" onClick={recheck} disabled={busy === "recheck"} className="font-semibold text-amber-900 hover:underline disabled:opacity-50">

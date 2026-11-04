@@ -26,6 +26,8 @@ export interface CallingStatusResponse {
   canCall: boolean;
   canRequestPermission: boolean;
   phone: string;
+  whatsappAccountId?: string;
+  canManageCalling?: boolean;
 }
 
 /** Calling eligibility + customer permission for a conversation (fetched when `enabled`). */

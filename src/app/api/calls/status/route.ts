@@ -47,5 +47,8 @@ export async function GET(req: NextRequest) {
     // A free-form permission request needs the 24 h window (outside it, an approved call_permission_request template is required).
     canRequestPermission: !blockedReason && calling.enabled && windowOpen && permission?.status !== "permanent" && permission?.canRequestPermission !== false,
     phone: contact.phone,
+    whatsappAccountId: whatsappAccount.id,
+    // Org admins may switch calling on for the number straight from the inbox.
+    canManageCalling: member.role === "ADMIN",
   });
 }
