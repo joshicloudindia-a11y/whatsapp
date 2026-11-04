@@ -1,5 +1,6 @@
 "use client";
 
+import { Icon } from "@/components/ui/icon";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
@@ -16,16 +17,16 @@ export default function AnalyticsPage() {
   const overview = data?.overview ?? {};
 
   const kpis = [
-    { label: "Total Conversations", value: overview.totalConversations ?? 0, icon: "💬", color: "#25D366" },
-    { label: "Open Conversations", value: overview.openConversations ?? 0, icon: "📂", color: "#3b82f6" },
-    { label: "Resolved", value: overview.resolvedConversations ?? 0, icon: "✅", color: "#10b981" },
-    { label: "Messages Sent", value: overview.messagesSent ?? 0, icon: "📤", color: "#8b5cf6" },
-    { label: "Messages Received", value: overview.messagesReceived ?? 0, icon: "📥", color: "#f59e0b" },
-    { label: "New Contacts", value: overview.newContacts ?? 0, icon: "👤", color: "#ef4444" },
+    { label: "Total Conversations", value: overview.totalConversations ?? 0, icon: "forum", color: "#25D366" },
+    { label: "Open Conversations", value: overview.openConversations ?? 0, icon: "folder_open", color: "#3b82f6" },
+    { label: "Resolved", value: overview.resolvedConversations ?? 0, icon: "check_circle", color: "#10b981" },
+    { label: "Messages Sent", value: overview.messagesSent ?? 0, icon: "outbox", color: "#8b5cf6" },
+    { label: "Messages Received", value: overview.messagesReceived ?? 0, icon: "move_to_inbox", color: "#f59e0b" },
+    { label: "New Contacts", value: overview.newContacts ?? 0, icon: "person_add", color: "#ef4444" },
   ];
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
       {/* Range picker */}
       <div className="flex gap-1">
         {[["7d", "Last 7 days"], ["30d", "Last 30 days"], ["90d", "Last 90 days"]].map(([val, label]) => (
@@ -47,7 +48,7 @@ export default function AnalyticsPage() {
           <div key={k.label} className="bg-white rounded-xl border p-5" style={{ borderColor: "#e2e8f0" }}>
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm text-slate-500">{k.label}</p>
-              <span className="text-lg">{k.icon}</span>
+              <Icon name={k.icon} className="w-5 h-5" style={{ color: k.color }} />
             </div>
             <p className="text-3xl font-bold" style={{ color: k.color }}>
               {isLoading ? "—" : k.value.toLocaleString()}

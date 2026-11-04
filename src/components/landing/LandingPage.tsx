@@ -1,15 +1,10 @@
 "use client";
 
+import { Icon } from "@/components/ui/icon";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import {
-  faInbox, faBullhorn, faRobot, faBolt, faChartLine, faCode,
-  faCheck, faBars, faXmark, faArrowRight, faUsers, faHeadset,
-  faGlobe, faShield, faStar, faLock, faHouse, faTag, faUser, faRocket,
-} from "@fortawesome/free-solid-svg-icons";
 import { cn } from "@/lib/utils";
 
 type Plan = {
@@ -24,32 +19,32 @@ const CURRENCY_SYMBOL: Record<string, string> = { USD: "$", INR: "₹", EUR: "�
 
 const FEATURES = [
   {
-    icon: faInbox, color: "#25D366", bg: "#dcfce7",
+    icon: "inbox", color: "#25D366", bg: "#dcfce7",
     title: "Team Inbox",
     desc: "Collaborate on every WhatsApp conversation. Assign, respond, and resolve together as a team.",
   },
   {
-    icon: faBullhorn, color: "#3b82f6", bg: "#dbeafe",
+    icon: "campaign", color: "#3b82f6", bg: "#dbeafe",
     title: "Broadcast Campaigns",
     desc: "Send personalized messages to thousands of customers at once with detailed delivery analytics.",
   },
   {
-    icon: faRobot, color: "#8b5cf6", bg: "#ede9fe",
+    icon: "smart_toy", color: "#8b5cf6", bg: "#ede9fe",
     title: "Chatbot Builder",
     desc: "Build no-code chatbots with a drag-and-drop flow editor to automate customer interactions 24/7.",
   },
   {
-    icon: faBolt, color: "#f59e0b", bg: "#fef3c7",
+    icon: "bolt", color: "#f59e0b", bg: "#fef3c7",
     title: "Smart Automation",
     desc: "Set up smart workflows that automatically respond, tag, and route conversations based on your rules.",
   },
   {
-    icon: faChartLine, color: "#ef4444", bg: "#fee2e2",
+    icon: "monitoring", color: "#ef4444", bg: "#fee2e2",
     title: "Analytics & Reports",
     desc: "Track message volume, response rates, agent performance, and campaign effectiveness in real time.",
   },
   {
-    icon: faCode, color: "#0ea5e9", bg: "#e0f2fe",
+    icon: "code", color: "#0ea5e9", bg: "#e0f2fe",
     title: "Developer API",
     desc: "Integrate ChatFlow into your CRM, e-commerce, or custom app with our comprehensive REST API.",
   },
@@ -99,17 +94,17 @@ const TESTIMONIALS = [
 function MobileBottomNav({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: string }) {
   const items = isLoggedIn
     ? [
-        { icon: faHouse,     label: "Home",      href: "#",         highlight: false },
-        { icon: faBolt,      label: "Features",  href: "#features", highlight: false },
-        { icon: faTag,       label: "Pricing",   href: "#pricing",  highlight: false },
-        { icon: faRocket,    label: "Dashboard", href: dashHref,    highlight: true  },
+        { icon: "home",     label: "Home",      href: "#",         highlight: false },
+        { icon: "bolt",      label: "Features",  href: "#features", highlight: false },
+        { icon: "sell",       label: "Pricing",   href: "#pricing",  highlight: false },
+        { icon: "rocket_launch",    label: "Dashboard", href: dashHref,    highlight: true  },
       ]
     : [
-        { icon: faHouse,  label: "Home",     href: "#",          highlight: false },
-        { icon: faBolt,   label: "Features", href: "#features",  highlight: false },
-        { icon: faTag,    label: "Pricing",  href: "#pricing",   highlight: false },
-        { icon: faUser,   label: "Login",    href: "/login",     highlight: false },
-        { icon: faRocket, label: "Start",    href: "/register",  highlight: true  },
+        { icon: "home",  label: "Home",     href: "#",          highlight: false },
+        { icon: "bolt",   label: "Features", href: "#features",  highlight: false },
+        { icon: "sell",    label: "Pricing",  href: "#pricing",   highlight: false },
+        { icon: "person",   label: "Login",    href: "/login",     highlight: false },
+        { icon: "rocket_launch", label: "Start",    href: "/register",  highlight: true  },
       ];
 
   return (
@@ -129,7 +124,7 @@ function MobileBottomNav({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHr
               )}
               style={item.highlight ? { background: "#25D366" } : {}}
             >
-              <FontAwesomeIcon icon={item.icon} className="w-5 h-5" />
+              <Icon name={item.icon} className="w-5 h-5" />
               {item.label}
             </Comp>
           );
@@ -191,7 +186,7 @@ function Navbar({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: strin
               className="text-sm font-semibold px-5 py-2 rounded-xl text-white transition-all hover:brightness-110 flex items-center gap-2"
               style={{ background: "#25D366" }}
             >
-              <FontAwesomeIcon icon={faRocket} className="w-3.5 h-3.5" />
+              <Icon name={"rocket_launch"} className="w-3.5 h-3.5" />
               Go to Dashboard
             </Link>
           ) : (
@@ -216,7 +211,7 @@ function Navbar({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: strin
           className={cn("md:hidden p-2 rounded-lg", scrolled ? "text-slate-700" : "text-white")}
           onClick={() => setMobileOpen(!mobileOpen)}
         >
-          <FontAwesomeIcon icon={mobileOpen ? faXmark : faBars} className="w-5 h-5" />
+          <Icon name={mobileOpen ? "close" : "menu"} className="w-5 h-5" />
         </button>
       </div>
 
@@ -281,7 +276,7 @@ function Hero({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: string 
               className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-bold text-white transition-all hover:brightness-110 shadow-lg"
               style={{ background: "#25D366", boxShadow: "0 0 30px #25D36650" }}
             >
-              <FontAwesomeIcon icon={faRocket} className="w-4 h-4" />
+              <Icon name={"rocket_launch"} className="w-4 h-4" />
               Go to Dashboard
             </Link>
           ) : (
@@ -291,7 +286,7 @@ function Hero({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: string 
                 style={{ background: "#25D366", boxShadow: "0 0 30px #25D36650" }}
               >
                 Get Started Free
-                <FontAwesomeIcon icon={faArrowRight} className="w-4 h-4" />
+                <Icon name={"arrow_forward"} className="w-4 h-4" />
               </Link>
               <Link href="/login"
                 className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-semibold text-white/80 border border-white/20 hover:bg-white/10 transition-all"
@@ -398,7 +393,7 @@ function Features() {
             >
               <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110"
                 style={{ background: f.bg }}>
-                <FontAwesomeIcon icon={f.icon} className="w-5 h-5" style={{ color: f.color }} />
+                <Icon name={f.icon} className="w-5 h-5" style={{ color: f.color }} />
               </div>
               <h3 className="text-base font-bold text-slate-900 mb-2">{f.title}</h3>
               <p className="text-sm text-slate-500 leading-relaxed">{f.desc}</p>
@@ -548,7 +543,7 @@ function Pricing({ isLoggedIn }: { isLoggedIn: boolean }) {
                       <ul className="space-y-2.5 mb-6 flex-1">
                         {plan.features.map((f, i) => (
                           <li key={i} className="flex items-start gap-2.5 text-sm text-slate-600">
-                            <FontAwesomeIcon icon={faCheck} className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "#25D366" }} />
+                            <Icon name={"check"} className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "#25D366" }} />
                             {f}
                           </li>
                         ))}
@@ -597,7 +592,7 @@ function Testimonials() {
             <div key={t.name} className="bg-slate-50 rounded-2xl p-7 flex flex-col gap-4 border" style={{ borderColor: "#e2e8f0" }}>
               <div className="flex gap-0.5">
                 {Array.from({ length: t.rating }).map((_, i) => (
-                  <FontAwesomeIcon key={i} icon={faStar} className="w-4 h-4" style={{ color: "#f59e0b" }} />
+                  <Icon key={i} name={"star"} className="w-4 h-4" style={{ color: "#f59e0b" }} />
                 ))}
               </div>
               <p className="text-sm text-slate-600 leading-relaxed flex-1">"{t.text}"</p>
@@ -616,18 +611,18 @@ function Testimonials() {
 // ─── Trust badges ─────────────────────────────────────────────────────────────
 function TrustBadges() {
   const badges = [
-    { icon: faShield,  label: "SOC 2 Compliant" },
-    { icon: faLock,    label: "End-to-End Encrypted" },
-    { icon: faGlobe,   label: "GDPR Ready" },
-    { icon: faHeadset, label: "24/7 Support" },
-    { icon: faUsers,   label: "99.9% Uptime SLA" },
+    { icon: "shield",  label: "SOC 2 Compliant" },
+    { icon: "lock",    label: "End-to-End Encrypted" },
+    { icon: "language",   label: "GDPR Ready" },
+    { icon: "support_agent", label: "24/7 Support" },
+    { icon: "group",   label: "99.9% Uptime SLA" },
   ];
   return (
     <section className="py-12 border-t border-b" style={{ background: "#f8fafc", borderColor: "#e2e8f0" }}>
       <div className="max-w-5xl mx-auto px-6 flex flex-wrap items-center justify-center gap-8">
         {badges.map((b) => (
           <div key={b.label} className="flex items-center gap-2 text-sm font-medium text-slate-600">
-            <FontAwesomeIcon icon={b.icon} className="w-4 h-4" style={{ color: "#25D366" }} />
+            <Icon name={b.icon} className="w-4 h-4" style={{ color: "#25D366" }} />
             {b.label}
           </div>
         ))}
@@ -656,7 +651,7 @@ function CTA({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: string }
               className="flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-bold text-white transition-all hover:brightness-110"
               style={{ background: "#25D366", boxShadow: "0 0 30px #25D36640" }}
             >
-              <FontAwesomeIcon icon={faRocket} className="w-4 h-4" />
+              <Icon name={"rocket_launch"} className="w-4 h-4" />
               Go to Dashboard
             </Link>
           ) : (
@@ -667,7 +662,7 @@ function CTA({ isLoggedIn, dashHref }: { isLoggedIn: boolean; dashHref: string }
                 style={{ background: "#25D366", boxShadow: "0 0 30px #25D36640" }}
               >
                 Start Free Trial
-                <FontAwesomeIcon icon={faArrowRight} className="w-4 h-4" />
+                <Icon name={"arrow_forward"} className="w-4 h-4" />
               </Link>
               <Link
                 href="/login"

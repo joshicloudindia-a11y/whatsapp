@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { planTierFromSlug } from "@/lib/plans";
 import { verifyRazorpaySignature } from "@/lib/razorpay";
 import { z } from "zod";
 
@@ -13,11 +14,6 @@ const schema = z.object({
   interval: z.enum(["monthly", "annual"]),
 });
 
-const PLAN_MAP: Record<string, "TRIAL" | "GROWTH" | "PRO" | "BUSINESS"> = {
-  growth: "GROWTH",
-  pro: "PRO",
-  business: "BUSINESS",
-};
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -39,20 +35,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Payment verification failed. Please contact support." }, { status: 400 });
   }
 
-  const plan = PLAN_MAP[body.planSlug.toLowerCase()] ?? "GROWTH";
+  const plan = planTierFromSlug(body.planSlug);
+  const paid = {
+    plan,
+    status: "ACTIVE" as const,
+    stripeSubscriptionId: `rzp_${body.razorpay_payment_id}`, // mark as paid (non-null)
+    currentPeriodStart: new Date(),
+    currentPeriodEnd: new Date(Date.now() + (body.interval === "annual" ? 365 : 30) * 24 * 60 * 60 * 1000),
+  };
 
   await prisma.$transaction([
-    prisma.subscription.update({
+    prisma.subscription.upsert({
       where: { organizationId: orgId },
-      data: {
-        plan,
-        status: "ACTIVE",
-        stripeSubscriptionId: `rzp_${body.razorpay_payment_id}`, // mark as paid (non-null)
-        currentPeriodStart: new Date(),
-        currentPeriodEnd: new Date(
-          Date.now() + (body.interval === "annual" ? 365 : 30) * 24 * 60 * 60 * 1000
-        ),
-      },
+      update: paid,
+      create: { organizationId: orgId, ...paid },
     }),
     prisma.organization.update({
       where: { id: orgId },

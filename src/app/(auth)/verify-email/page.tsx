@@ -41,8 +41,8 @@ function VerifyEmailContent() {
   }, [token]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
-      <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border p-8 space-y-6 text-center" style={{ borderColor: "#e2e8f0" }}>
+    <div className="w-full">
+      <div className="w-full bg-white rounded-3xl shadow-xl shadow-slate-900/5 border border-slate-200/80 p-6 sm:p-8 space-y-6 text-center" style={{ borderColor: "#e2e8f0" }}>
         {/* Logo */}
         <div className="flex flex-col items-center gap-2">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "#25D366" }}>
@@ -73,7 +73,7 @@ function VerifyEmailContent() {
 export default function VerifyEmailPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="flex items-center justify-center py-16">
         <div className="w-10 h-10 border-4 border-green-500 border-t-transparent rounded-full animate-spin" />
       </div>
     }>

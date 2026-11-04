@@ -192,3 +192,31 @@ export function parseWebhookMessage(entry: any): ParsedWebhookChange[] {
   }
   return result;
 }
+
+export interface PhoneNumberInfo {
+  display_phone_number?: string;
+  verified_name?: string;
+  quality_rating?: string;
+  messaging_limit_tier?: string;
+}
+
+/** Validates a Phone Number ID + token pair against Meta and returns the number's details. */
+export async function getPhoneNumberInfo(phoneNumberId: string, accessToken: string): Promise<PhoneNumberInfo> {
+  const res = await fetch(
+    `${META_API_BASE}/${encodeURIComponent(phoneNumberId)}?fields=display_phone_number,verified_name,quality_rating,messaging_limit_tier`,
+    { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" }
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error?.message ?? "Could not verify the number with Meta");
+  return data;
+}
+
+/** Subscribes our Meta app to the WABA so webhook events are delivered. */
+export async function subscribeAppToWaba(wabaId: string, accessToken: string): Promise<boolean> {
+  const res = await fetch(`${META_API_BASE}/${encodeURIComponent(wabaId)}/subscribed_apps`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  return res.ok && data?.success !== false;
+}

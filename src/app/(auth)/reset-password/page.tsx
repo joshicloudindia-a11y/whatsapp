@@ -1,5 +1,6 @@
 "use client";
 
+import { Icon } from "@/components/ui/icon";
 import { useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import axios from "axios";
@@ -35,8 +36,8 @@ function ResetPasswordForm() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
-      <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border p-8 space-y-6" style={{ borderColor: "#e2e8f0" }}>
+    <div className="w-full">
+      <div className="w-full bg-white rounded-3xl shadow-xl shadow-slate-900/5 border border-slate-200/80 p-6 sm:p-8 space-y-6" style={{ borderColor: "#e2e8f0" }}>
         {/* Logo */}
         <div className="flex flex-col items-center gap-2">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "#25D366" }}>
@@ -51,9 +52,7 @@ function ResetPasswordForm() {
         {done ? (
           <div className="text-center space-y-3">
             <div className="w-12 h-12 rounded-full mx-auto flex items-center justify-center" style={{ background: "#dcfce7" }}>
-              <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
+              <Icon name="check" className="w-6 h-6 text-green-600" />
             </div>
             <p className="text-sm font-medium text-slate-900">Password reset successfully!</p>
             <p className="text-xs text-slate-400">Redirecting to login...</p>
@@ -116,7 +115,7 @@ function ResetPasswordForm() {
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="text-slate-400 text-sm">Loading...</div></div>}>
+    <Suspense fallback={<div className="flex items-center justify-center py-16"><div className="text-slate-400 text-sm">Loading...</div></div>}>
       <ResetPasswordForm />
     </Suspense>
   );

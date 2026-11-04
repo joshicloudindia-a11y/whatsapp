@@ -39,15 +39,15 @@ export default function TemplatesPage() {
   };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex gap-1">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+      <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex gap-1 overflow-x-auto no-scrollbar">
           {STATUSES.map((s) => (
             <button
               key={s}
               onClick={() => setFilterStatus(s)}
               className={cn(
-                "px-3 py-1.5 text-xs font-medium rounded-lg transition-colors",
+                "shrink-0 whitespace-nowrap px-3 py-1.5 text-xs font-medium rounded-lg transition-colors",
                 filterStatus === s ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
               )}
             >
@@ -57,7 +57,7 @@ export default function TemplatesPage() {
         </div>
         <button
           onClick={() => setShowCreate(true)}
-          className="px-4 py-2 text-sm font-medium text-white rounded-lg"
+          className="self-start sm:self-auto shrink-0 px-4 py-2 text-sm font-medium text-white rounded-lg"
           style={{ background: "#25D366" }}
         >
           + New Template

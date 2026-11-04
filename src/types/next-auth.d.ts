@@ -12,6 +12,10 @@ declare module "next-auth" {
       organizationId: string;
       organizationSlug: string;
       role: string;
+      /** Set only when signed in through /admin/login (OTP verified). */
+      adminRole: string | null;
+      /** Epoch ms of the admin OTP login; admin panel session expires 8h after this. */
+      adminAuthAt: number | null;
     };
   }
 
@@ -21,6 +25,8 @@ declare module "next-auth" {
     organizationId?: string | null;
     organizationSlug?: string | null;
     role?: string | null;
+    adminRole?: string | null;
+    adminAuthAt?: number | null;
   }
 }
 
@@ -31,5 +37,7 @@ declare module "next-auth/jwt" {
     organizationId?: string | null;
     organizationSlug?: string | null;
     role?: string | null;
+    adminRole?: string | null;
+    adminAuthAt?: number | null;
   }
 }

@@ -53,3 +53,34 @@ body {
 .bubble-outbound {
   background: #dcf8c6;
 }
+
+/* ── Super admin panel utilities ─────────────────────────────────────────── */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+@keyframes admin-fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes admin-sheet-in { from { transform: translateY(24px); opacity: 0 } to { transform: none; opacity: 1 } }
+@keyframes admin-pop-in { from { transform: scale(.96); opacity: 0 } to { transform: none; opacity: 1 } }
+.admin-fade { animation: admin-fade-in .18s ease-out }
+.admin-pop { animation: admin-sheet-in .22s cubic-bezier(.2,.8,.2,1) }
+@media (min-width: 640px) { .admin-pop { animation: admin-pop-in .18s ease-out } }
+@media (prefers-reduced-motion: reduce) { .admin-fade, .admin-pop { animation: none } }
+
+/* ── Auth pages ──────────────────────────────────────────────────────────── */
+@keyframes auth-float { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-8px) } }
+@keyframes auth-rise { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
+.auth-float { animation: auth-float 6s ease-in-out infinite }
+.auth-card { animation: auth-rise .35s ease-out both }
+@media (prefers-reduced-motion: reduce) { .auth-float, .auth-card { animation: none } }
+
+/* ── Material Symbols ────────────────────────────────────────────────────── */
+.mi {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 1;
+  overflow: visible;
+  user-select: none;
+  font-size: 1.25em;
+}

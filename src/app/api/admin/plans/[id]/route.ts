@@ -1,44 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { audit, requireAdmin } from "@/lib/admin-auth";
+import { sanitizePlanInput } from "@/lib/admin-plans";
 
-async function requireSuperAdmin() {
-  const session = await getServerSession(authOptions);
-  if (!session) return null;
-  const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { isSuperAdmin: true } });
-  return user?.isSuperAdmin ? session : null;
-}
+type Params = { params: Promise<{ id: string }> };
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await requireSuperAdmin();
-  if (!session) return NextResponse.json({ error: "Super admin only" }, { status: 403 });
-
+export async function PATCH(req: NextRequest, { params }: Params) {
+  const { ctx, response } = await requireAdmin("plans:write");
+  if (!ctx) return response;
   const { id } = await params;
-  const body = await req.json();
 
-  const numericFields = ["monthlyPrice","annualPrice","sortOrder","maxUsers","maxBroadcasts","maxAutomations","maxApiCalls","maxAiCredits","maxWhatsappNumbers"];
-  const data: any = { ...body };
-  numericFields.forEach((f) => { if (data[f] !== undefined) data[f] = Number(data[f]); });
+  const body = (await req.json().catch(() => null)) ?? {};
+  const result = sanitizePlanInput(body);
+  if ("error" in result) return NextResponse.json({ error: result.error }, { status: 400 });
+  if (Object.keys(result.data).length === 0) return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
 
   try {
-    const plan = await prisma.planConfig.update({ where: { id }, data });
+    const plan = await prisma.planConfig.update({ where: { id }, data: result.data });
+    await audit(ctx, "plan.update", { entity: "PlanConfig", entityId: id, metadata: { name: plan.name, fields: Object.keys(result.data) } });
     return NextResponse.json({ plan });
-  } catch (e: any) {
-    if (e.code === "P2025") return NextResponse.json({ error: "Plan not found" }, { status: 404 });
+  } catch (e) {
+    const code = (e as { code?: string }).code;
+    if (code === "P2025") return NextResponse.json({ error: "Plan not found" }, { status: 404 });
+    if (code === "P2002") return NextResponse.json({ error: "Plan name/slug already exists" }, { status: 409 });
     return NextResponse.json({ error: "Update failed" }, { status: 500 });
   }
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await requireSuperAdmin();
-  if (!session) return NextResponse.json({ error: "Super admin only" }, { status: 403 });
-
+export async function DELETE(_req: NextRequest, { params }: Params) {
+  const { ctx, response } = await requireAdmin("plans:delete");
+  if (!ctx) return response;
   const { id } = await params;
+
   try {
-    await prisma.planConfig.delete({ where: { id } });
+    const plan = await prisma.planConfig.delete({ where: { id } });
+    await audit(ctx, "plan.delete", { entity: "PlanConfig", entityId: id, metadata: { name: plan.name } });
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (e) {
+    if ((e as { code?: string }).code === "P2025") return NextResponse.json({ error: "Plan not found" }, { status: 404 });
     return NextResponse.json({ error: "Delete failed" }, { status: 500 });
   }
 }

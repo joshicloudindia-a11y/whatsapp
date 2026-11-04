@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import bcrypt from "bcryptjs";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import bcrypt from "bcryptjs";
-import { z } from "zod";
-
-const schema = z.object({
-  name: z.string().min(2).optional(),
-  currentPassword: z.string().optional(),
-  newPassword: z.string().min(8).optional(),
-});
+import { validatePassword } from "@/lib/admin-users";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -17,45 +11,54 @@ export async function GET() {
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { id: true, name: true, email: true, avatar: true, emailVerified: true, createdAt: true },
+    select: {
+      id: true, name: true, email: true, avatar: true, emailVerified: true, createdAt: true, lastLoginAt: true,
+      passwordHash: true,
+      memberships: {
+        where: { isActive: true },
+        select: { role: true, joinedAt: true, createdAt: true, organization: { select: { id: true, name: true, slug: true, plan: true } } },
+      },
+    },
   });
+  if (!user) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  return NextResponse.json({ user });
+  const { passwordHash, ...rest } = user;
+  return NextResponse.json({ user: { ...rest, hasPassword: !!passwordHash } });
 }
 
 export async function PATCH(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  try {
-    const body = schema.parse(await req.json());
-    const updateData: any = {};
+  const body = (await req.json().catch(() => null)) ?? {};
+  const data: { name?: string; passwordHash?: string } = {};
 
-    if (body.name) updateData.name = body.name;
-
-    // Password change
-    if (body.newPassword) {
-      if (!body.currentPassword) {
-        return NextResponse.json({ error: "Current password required" }, { status: 400 });
-      }
-      const user = await prisma.user.findUnique({ where: { id: session.user.id } });
-      if (!user?.passwordHash) return NextResponse.json({ error: "No password set" }, { status: 400 });
-
-      const valid = await bcrypt.compare(body.currentPassword, user.passwordHash);
-      if (!valid) return NextResponse.json({ error: "Current password incorrect" }, { status: 400 });
-
-      updateData.passwordHash = await bcrypt.hash(body.newPassword, 12);
-    }
-
-    const user = await prisma.user.update({
-      where: { id: session.user.id },
-      data: updateData,
-      select: { id: true, name: true, email: true, avatar: true },
-    });
-
-    return NextResponse.json({ user });
-  } catch (error: any) {
-    if (error.name === "ZodError") return NextResponse.json({ error: "Invalid input" }, { status: 422 });
-    return NextResponse.json({ error: "Update failed" }, { status: 500 });
+  if (body.name !== undefined) {
+    const name = String(body.name).trim().replace(/\s+/g, " ").slice(0, 100);
+    if (name.length < 2) return NextResponse.json({ error: "Name must be at least 2 characters" }, { status: 400 });
+    data.name = name;
   }
+
+  if (body.newPassword !== undefined) {
+    const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { passwordHash: true } });
+    if (!user?.passwordHash) return NextResponse.json({ error: "No password set on this account" }, { status: 400 });
+    if (!body.currentPassword || !(await bcrypt.compare(String(body.currentPassword), user.passwordHash))) {
+      return NextResponse.json({ error: "Current password is incorrect" }, { status: 400 });
+    }
+    const pwError = validatePassword(body.newPassword);
+    if (pwError) return NextResponse.json({ error: pwError }, { status: 400 });
+    if (await bcrypt.compare(String(body.newPassword), user.passwordHash)) {
+      return NextResponse.json({ error: "New password must be different from the current one" }, { status: 400 });
+    }
+    data.passwordHash = await bcrypt.hash(String(body.newPassword), 12);
+  }
+
+  if (Object.keys(data).length === 0) return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
+
+  const user = await prisma.user.update({
+    where: { id: session.user.id },
+    data,
+    select: { id: true, name: true, email: true, avatar: true },
+  });
+  return NextResponse.json({ user, passwordChanged: !!data.passwordHash });
 }

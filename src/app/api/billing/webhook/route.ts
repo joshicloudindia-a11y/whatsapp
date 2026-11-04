@@ -1,17 +1,12 @@
 import { NextRequest } from "next/server";
 import { getStripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
+import { planTierFromSlug } from "@/lib/plans";
 import Stripe from "stripe";
 
-const PLAN_MAP: Record<string, string> = {
-  growth: "GROWTH",
-  pro: "PRO",
-  business: "BUSINESS",
-  trial: "TRIAL",
-};
 
-function toPlan(slug: string): "TRIAL" | "GROWTH" | "PRO" | "BUSINESS" {
-  return (PLAN_MAP[slug.toLowerCase()] ?? "GROWTH") as any;
+function toPlan(slug: string) {
+  return planTierFromSlug(slug);
 }
 
 function toStatus(s: string): "ACTIVE" | "PAST_DUE" | "CANCELED" | "UNPAID" | "TRIALING" {

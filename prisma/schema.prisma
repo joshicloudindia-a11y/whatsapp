@@ -63,6 +63,15 @@ model User {
   avatar        String?
   isActive      Boolean   @default(true)
   isSuperAdmin  Boolean   @default(false)
+  // Platform (super admin panel) RBAC – null = not admin staff
+  adminRole           AdminRole?
+  /// Custom/system role from AdminRoleDefinition (takes precedence over legacy adminRole)
+  adminRoleId         String?
+  failedLoginAttempts Int        @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  lastLoginIp         String?
+  sessionsRevokedAt   DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -72,6 +81,72 @@ model User {
   sessions              UserSession[]
   verificationTokens    VerificationToken[]
   passwordResets        PasswordReset[]
+  adminLoginChallenges  AdminLoginChallenge[]
+  adminRoleDef          AdminRoleDefinition? @relation(fields: [adminRoleId], references: [id], onDelete: SetNull)
+
+  @@index([adminRoleId])
+}
+
+/// Super admin panel roles (system + custom) with a permission list.
+model AdminRoleDefinition {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String   @unique
+  description String?  @db.Text
+  color       String   @default("#64748b")
+  /// Higher = more privileged. Admins can only manage roles/users below their own level.
+  level       Int      @default(40)
+  permissions Json     @default("[]")
+  isSystem    Boolean  @default(false)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users User[]
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  SUPPORT
+  VIEWER
+}
+
+// Email-OTP second factor for /admin/login
+model AdminLoginChallenge {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  codeHash  String
+  attempts  Int       @default(0)
+  expiresAt DateTime
+  usedAt    DateTime?
+  ip        String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Immutable trail of every super admin panel action and admin login event
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actorEmail String?
+  actorRole  String?
+  action     String
+  entity     String?
+  entityId   String?
+  metadata   Json?
+  ip         String?
+  userAgent  String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([action, createdAt])
+  @@index([ip, createdAt])
+  @@index([createdAt])
 }
 
 model UserSession {

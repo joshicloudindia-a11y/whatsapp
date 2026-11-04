@@ -28,7 +28,7 @@ export default function ForgotPasswordPage() {
 
   if (sent) {
     return (
-      <div className="bg-white rounded-2xl shadow-sm border p-8 text-center space-y-4">
+      <div className="bg-white rounded-3xl shadow-xl shadow-slate-900/5 border border-slate-200/80 p-6 sm:p-8 text-center space-y-4">
         <h2 className="text-xl font-bold">Check your email</h2>
         <p className="text-slate-500 text-sm">
           If an account exists for <strong>{email}</strong>, you'll receive a reset link shortly.
@@ -41,7 +41,7 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border p-8 space-y-6">
+    <div className="bg-white rounded-3xl shadow-xl shadow-slate-900/5 border border-slate-200/80 p-6 sm:p-8 space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Reset your password</h1>
         <p className="text-slate-500 text-sm mt-1">We'll send you a reset link.</p>

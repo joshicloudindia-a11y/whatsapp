@@ -1,5 +1,6 @@
 "use client";
 
+import { Icon } from "@/components/ui/icon";
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -39,7 +40,7 @@ function RegisterForm({
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border p-8 space-y-6" style={{ borderColor: "#e2e8f0" }}>
+    <div className="bg-white rounded-3xl shadow-xl shadow-slate-900/5 border border-slate-200/80 p-6 sm:p-8 space-y-6" style={{ borderColor: "#e2e8f0" }}>
       <div className="space-y-1">
         <h1 className="text-2xl font-bold text-slate-900">Start your free trial</h1>
         <p className="text-slate-500 text-sm">7 days free. No credit card required.</p>
@@ -173,13 +174,11 @@ function OtpStep({ email, name }: { email: string; name: string }) {
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border p-8 space-y-6 text-center" style={{ borderColor: "#e2e8f0" }}>
+    <div className="bg-white rounded-3xl shadow-xl shadow-slate-900/5 border border-slate-200/80 p-6 sm:p-8 space-y-6 text-center" style={{ borderColor: "#e2e8f0" }}>
       {/* Icon */}
       <div className="flex flex-col items-center gap-3">
         <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: "#dcf8c6" }}>
-          <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="#25D366" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-          </svg>
+          <Icon name="mark_email_read" className="w-7 h-7" style={{ color: "#25D366" }} />
         </div>
         <div>
           <h2 className="text-xl font-bold text-slate-900">Check your email</h2>

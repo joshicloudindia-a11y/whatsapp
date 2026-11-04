@@ -1,17 +1,32 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireOrgMember } from "@/lib/org-auth";
+import { seatUsage } from "@/lib/team";
 
-export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET() {
+  const { member, response } = await requireOrgMember();
+  if (!member) return response;
+  const organizationId = member.organizationId;
+  const isAdmin = member.role === "ADMIN";
 
-  const members = await prisma.organizationMember.findMany({
-    where: { organizationId: session.user.organizationId, isActive: true },
-    include: { user: { select: { id: true, name: true, email: true, avatar: true } } },
-    orderBy: { createdAt: "asc" },
-  });
+  const [members, invitations, seats] = await Promise.all([
+    prisma.organizationMember.findMany({
+      where: { organizationId, isActive: true },
+      select: {
+        id: true, role: true, joinedAt: true, createdAt: true,
+        user: { select: { id: true, name: true, email: true, avatar: true, lastLoginAt: true, isActive: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    isAdmin
+      ? prisma.invitation.findMany({
+          where: { organizationId, acceptedAt: null },
+          select: { id: true, email: true, role: true, expiresAt: true, createdAt: true },
+          orderBy: { createdAt: "desc" },
+        })
+      : Promise.resolve([]),
+    seatUsage(organizationId),
+  ]);
 
-  return NextResponse.json({ members });
+  return NextResponse.json({ members, invitations, seats, me: { userId: member.userId, isAdmin } });
 }

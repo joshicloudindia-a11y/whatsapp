@@ -37,7 +37,7 @@ export default function ContactsPage() {
   };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-4">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
       {/* Toolbar */}
       <div className="flex items-center gap-3">
         <input
@@ -65,7 +65,7 @@ export default function ContactsPage() {
       </div>
 
       {/* Stats bar */}
-      <div className="flex gap-6 text-sm text-slate-500">
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-500">
         <span><strong className="text-slate-900">{data?.total ?? 0}</strong> total contacts</span>
         {STAGES.map((s) => (
           <span key={s}>
@@ -79,7 +79,8 @@ export default function ContactsPage() {
 
       {/* Table */}
       <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: "#e2e8f0" }}>
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b text-left text-xs text-slate-500 uppercase tracking-wide" style={{ borderColor: "#e2e8f0", background: "#f8fafc" }}>
               <th className="px-4 py-3">Contact</th>
@@ -126,6 +127,7 @@ export default function ContactsPage() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Add Contact Modal */}

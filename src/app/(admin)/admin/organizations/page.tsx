@@ -1,340 +1,387 @@
 "use client";
 
+import { Icon } from "@/components/ui/icon";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { toast } from "sonner";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { useAdmin } from "@/components/admin/admin-context";
 import {
-  faMagnifyingGlass, faMobileScreenButton, faTrash, faPen, faPlus,
-  faCircleCheck, faCircleXmark, faWifi,
-} from "@fortawesome/free-solid-svg-icons";
+  Page, PageHeader, Card, Button, IconButton, Badge, Field, inputCls, SearchInput, FilterTabs, EmptyState,
+  SkeletonRows, Pagination, Modal, ConfirmDialog, apiError, useDebounced, PLAN_TONES, Avatar,
+} from "@/components/admin/ui";
 
 const PLANS = ["TRIAL", "GROWTH", "PRO", "BUSINESS"] as const;
-const PLAN_STYLE: Record<string, { bg: string; text: string; dot: string }> = {
-  TRIAL:    { bg: "#f1f5f9", text: "#64748b", dot: "#94a3b8" },
-  GROWTH:   { bg: "#f0fdf4", text: "#16a34a", dot: "#22c55e" },
-  PRO:      { bg: "#f5f3ff", text: "#7c3aed", dot: "#8b5cf6" },
-  BUSINESS: { bg: "#fffbeb", text: "#d97706", dot: "#f59e0b" },
-};
+type PlanName = (typeof PLANS)[number];
+const LIMIT = 20;
 
-const WA_EMPTY = { phoneNumber: "", phoneNumberId: "", displayName: "", wabaId: "", accessToken: "" };
+interface OrgRow {
+  id: string; name: string; slug: string; plan: PlanName; website: string | null; trialEndsAt: string | null; createdAt: string;
+  subscription: { plan: string; status: string } | null;
+  _count: { members: number; conversations: number; broadcasts: number; whatsappAccounts: number };
+}
 
 export default function AdminOrganizationsPage() {
   const qc = useQueryClient();
+  const { can } = useAdmin();
   const [search, setSearch] = useState("");
-  const [editOrg, setEditOrg] = useState<any | null>(null);
-  const [planValue, setPlanValue] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [plan, setPlan] = useState<"ALL" | PlanName>("ALL");
+  const [page, setPage] = useState(1);
+  const debounced = useDebounced(search);
 
-  const [waOrg, setWaOrg] = useState<any | null>(null);
-  const [waForm, setWaForm] = useState({ ...WA_EMPTY });
-  const [showWaForm, setShowWaForm] = useState(false);
-  const [waDeleting, setWaDeleting] = useState<string | null>(null);
-  const [waSaving, setWaSaving] = useState(false);
+  const [formOrg, setFormOrg] = useState<OrgRow | "new" | null>(null);
+  const [viewOrg, setViewOrg] = useState<OrgRow | null>(null);
+  const [deleting, setDeleting] = useState<OrgRow | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["admin-orgs", search],
-    queryFn: () => axios.get(`/api/admin/organizations?search=${search}&limit=50`).then((r) => r.data),
+    queryKey: ["admin-orgs", debounced, plan, page],
+    queryFn: () =>
+      axios.get("/api/admin/organizations", {
+        params: { search: debounced, page, limit: LIMIT, ...(plan !== "ALL" && { plan }) },
+      }).then((r) => r.data),
+    placeholderData: (prev) => prev,
   });
+  const orgs: OrgRow[] = data?.organizations ?? [];
+  const refresh = () => qc.invalidateQueries({ queryKey: ["admin-orgs"] });
 
-  const { data: waOrgData, refetch: refetchWa } = useQuery({
-    queryKey: ["admin-org-detail", waOrg?.id],
-    queryFn: () => waOrg ? axios.get(`/api/admin/organizations/${waOrg.id}`).then((r) => r.data) : null,
-    enabled: !!waOrg,
-  });
-  const waAccounts: any[] = waOrgData?.organization?.whatsappAccounts ?? [];
-
-  const orgs = data?.organizations ?? [];
-
-  const openEdit = (org: any) => { setEditOrg(org); setPlanValue(org.plan); };
-
-  const savePlan = async () => {
-    if (!editOrg) return;
-    setSaving(true);
+  const doDelete = async () => {
+    if (!deleting) return;
+    setBusy(true);
     try {
-      await axios.patch(`/api/admin/organizations/${editOrg.id}`, { plan: planValue });
-      toast.success(`Plan updated to ${planValue}`);
-      qc.invalidateQueries({ queryKey: ["admin-orgs"] });
-      setEditOrg(null);
-    } catch { toast.error("Failed to update plan"); }
-    finally { setSaving(false); }
-  };
-
-  const deleteOrg = async (org: any) => {
-    if (!confirm(`Delete "${org.name}"? This cannot be undone.`)) return;
-    try {
-      await axios.delete(`/api/admin/organizations/${org.id}`);
+      await axios.delete(`/api/admin/organizations/${deleting.id}`, { params: { confirm: deleting.slug } });
       toast.success("Organization deleted");
-      qc.invalidateQueries({ queryKey: ["admin-orgs"] });
-    } catch { toast.error("Failed to delete"); }
+      setDeleting(null);
+      refresh();
+    } catch (e) { toast.error(apiError(e)); }
+    finally { setBusy(false); }
   };
 
-  const handleWaAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setWaSaving(true);
-    try {
-      await axios.post(`/api/admin/organizations/${waOrg.id}/whatsapp`, waForm);
-      toast.success("WhatsApp number connected");
-      setWaForm({ ...WA_EMPTY });
-      setShowWaForm(false);
-      refetchWa();
-    } catch (e: any) { toast.error(e.response?.data?.error ?? "Failed"); }
-    finally { setWaSaving(false); }
-  };
-
-  const handleWaToggle = async (acc: any) => {
-    try {
-      await axios.patch(`/api/admin/organizations/${waOrg.id}/whatsapp?accountId=${acc.id}`, { isActive: !acc.isActive });
-      toast.success(acc.isActive ? "Deactivated" : "Activated");
-      refetchWa();
-    } catch { toast.error("Update failed"); }
-  };
-
-  const handleWaDelete = async (acc: any) => {
-    if (!confirm(`Disconnect "${acc.displayName}"?`)) return;
-    setWaDeleting(acc.id);
-    try {
-      await axios.delete(`/api/admin/organizations/${waOrg.id}/whatsapp?accountId=${acc.id}`);
-      toast.success("Disconnected");
-      refetchWa();
-    } catch { toast.error("Failed"); }
-    finally { setWaDeleting(null); }
-  };
+  const Actions = ({ o }: { o: OrgRow }) => (
+    <div className="flex items-center gap-1.5">
+      <IconButton icon={"visibility"} label="View details & WhatsApp" onClick={() => setViewOrg(o)} />
+      {can("orgs:write") && <IconButton icon={"edit"} label="Edit organization" onClick={() => setFormOrg(o)} />}
+      {can("orgs:delete") && <IconButton icon={"delete"} label="Delete organization" tone="danger" onClick={() => setDeleting(o)} />}
+    </div>
+  );
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Organizations</h1>
-          <p className="text-slate-500 text-sm mt-1">Manage all customer workspaces</p>
-        </div>
-        <span className="text-sm font-medium text-slate-500 bg-white border border-slate-200 rounded-lg px-3 py-1.5">
-          {data?.total ?? 0} total
-        </span>
-      </div>
+    <Page>
+      <PageHeader
+        title="Organizations"
+        description="Every workspace on the platform, their plans and WhatsApp numbers"
+        actions={can("orgs:create") && <Button icon={"add"} onClick={() => setFormOrg("new")}>New organization</Button>}
+      />
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <FontAwesomeIcon icon={faMagnifyingGlass} className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-        <input
-          type="text"
-          placeholder="Search organizations..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Search name or slug…" />
+        <FilterTabs<"ALL" | PlanName>
+          value={plan}
+          onChange={(v) => { setPlan(v); setPage(1); }}
+          options={[{ value: "ALL", label: "All plans" }, ...PLANS.map((p) => ({ value: p, label: p[0] + p.slice(1).toLowerCase() }))]}
         />
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
-        <table className="w-full min-w-[700px]">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50">
-              <th className="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Organization</th>
-              <th className="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Plan</th>
-              <th className="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Members</th>
-              <th className="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Conversations</th>
-              <th className="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Created</th>
-              <th className="px-5 py-3.5" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {isLoading ? (
-              <tr><td colSpan={6} className="px-5 py-12 text-center text-slate-400 text-sm">Loading...</td></tr>
-            ) : orgs.length === 0 ? (
-              <tr><td colSpan={6} className="px-5 py-12 text-center text-slate-400 text-sm">No organizations found</td></tr>
-            ) : orgs.map((org: any) => {
-              const s = PLAN_STYLE[org.plan] ?? PLAN_STYLE.TRIAL;
-              return (
-                <tr key={org.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
-                        style={{ background: s.bg, color: s.dot }}
-                      >
-                        {org.name[0].toUpperCase()}
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">{org.name}</p>
-                        <p className="text-xs text-slate-400">{org.slug}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-5 py-4">
-                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background: s.bg, color: s.text }}>
-                      {org.plan}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4 text-sm text-slate-700">{org._count?.members ?? 0}</td>
-                  <td className="px-5 py-4 text-sm text-slate-700">{org._count?.conversations ?? 0}</td>
-                  <td className="px-5 py-4 text-xs text-slate-400">{new Date(org.createdAt).toLocaleDateString()}</td>
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => openEdit(org)}
-                        title="Change Plan"
-                        className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors"
-                      >
-                        <FontAwesomeIcon icon={faPen} className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => { setWaOrg(org); setShowWaForm(false); setWaForm({ ...WA_EMPTY }); }}
-                        title="Manage WhatsApp"
-                        className="w-8 h-8 flex items-center justify-center rounded-lg border border-green-200 text-green-600 hover:bg-green-50 transition-colors"
-                      >
-                        <FontAwesomeIcon icon={faMobileScreenButton} className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => deleteOrg(org)}
-                        title="Delete Organization"
-                        className="w-8 h-8 flex items-center justify-center rounded-lg border border-red-100 text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors"
-                      >
-                        <FontAwesomeIcon icon={faTrash} className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {/* WhatsApp Modal */}
-      {waOrg && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-5 my-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "#25D366" }}>
-                  <FontAwesomeIcon icon={faMobileScreenButton} className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">WhatsApp Numbers</h3>
-                  <p className="text-xs text-slate-500">{waOrg.name}</p>
-                </div>
-              </div>
-              <button onClick={() => setWaOrg(null)} className="text-slate-400 hover:text-slate-600 text-2xl leading-none w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100">×</button>
+      <Card className="overflow-hidden">
+        {isLoading ? <SkeletonRows /> : orgs.length === 0 ? (
+          <EmptyState
+            icon={"apartment"} title="No organizations found" description="Try a different search or create one."
+            action={can("orgs:create") && <Button icon={"add"} onClick={() => setFormOrg("new")}>New organization</Button>}
+          />
+        ) : (
+          <>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50/80 text-[11px] uppercase tracking-wider text-slate-500">
+                  <tr>
+                    {["Organization", "Plan", "Members", "WhatsApp", "Conversations", "Created", ""].map((h) => (
+                      <th key={h} className="text-left font-semibold px-5 py-3">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {orgs.map((o) => (
+                    <tr key={o.id} className="hover:bg-slate-50/60">
+                      <td className="px-5 py-3.5">
+                        <button onClick={() => setViewOrg(o)} className="flex items-center gap-3 text-left">
+                          <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600 shrink-0">
+                            {o.name[0]?.toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-900 truncate max-w-[220px] hover:text-green-600">{o.name}</p>
+                            <p className="text-xs text-slate-400 font-mono">{o.slug}</p>
+                          </div>
+                        </button>
+                      </td>
+                      <td className="px-5 py-3.5"><Badge tone={PLAN_TONES[o.plan]}>{o.plan}</Badge></td>
+                      <td className="px-5 py-3.5 tabular-nums text-slate-600">{o._count.members}</td>
+                      <td className="px-5 py-3.5 tabular-nums text-slate-600">{o._count.whatsappAccounts}</td>
+                      <td className="px-5 py-3.5 tabular-nums text-slate-600">{o._count.conversations.toLocaleString()}</td>
+                      <td className="px-5 py-3.5 text-xs text-slate-400">{new Date(o.createdAt).toLocaleDateString()}</td>
+                      <td className="px-5 py-3.5"><div className="flex justify-end"><Actions o={o} /></div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
 
-            <div className="space-y-2">
-              {waAccounts.length === 0 ? (
-                <div className="text-center py-6 text-slate-400">
-                  <FontAwesomeIcon icon={faWifi} className="w-6 h-6 mb-2 opacity-40" />
-                  <p className="text-sm">No numbers connected yet</p>
-                </div>
-              ) : waAccounts.map((acc: any) => (
-                <div key={acc.id} className="flex items-center justify-between gap-3 bg-slate-50 rounded-xl px-4 py-3 border border-slate-100">
-                  <div className="min-w-0 flex items-center gap-3">
-                    <FontAwesomeIcon icon={acc.isActive ? faCircleCheck : faCircleXmark} className={`w-4 h-4 shrink-0 ${acc.isActive ? "text-green-500" : "text-slate-300"}`} />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-900 truncate">{acc.displayName || "—"}</p>
-                      <p className="text-xs text-slate-400 font-mono">+{acc.phoneNumber}</p>
+            <ul className="md:hidden divide-y divide-slate-100">
+              {orgs.map((o) => (
+                <li key={o.id} className="p-4">
+                  <button onClick={() => setViewOrg(o)} className="w-full flex items-start gap-3 text-left">
+                    <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-sm font-bold text-slate-600 shrink-0">
+                      {o.name[0]?.toUpperCase()}
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button onClick={() => handleWaToggle(acc)}
-                      className="text-xs px-2.5 py-1 border border-slate-200 rounded-lg text-slate-600 hover:bg-white font-medium bg-white">
-                      {acc.isActive ? "Deactivate" : "Activate"}
-                    </button>
-                    <button onClick={() => handleWaDelete(acc)} disabled={waDeleting === acc.id}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-red-50 text-red-400 hover:bg-red-100 hover:text-red-600 disabled:opacity-40">
-                      <FontAwesomeIcon icon={faTrash} className="w-3 h-3" />
-                    </button>
-                  </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-slate-900 text-sm truncate">{o.name}</p>
+                        <Badge tone={PLAN_TONES[o.plan]}>{o.plan}</Badge>
+                      </div>
+                      <p className="text-xs text-slate-400 font-mono truncate">{o.slug}</p>
+                      <div className="mt-2 flex gap-4 text-[11px] text-slate-500">
+                        <span><Icon name={"group"} className="w-2.5 h-2.5 mr-1" />{o._count.members}</span>
+                        <span><Icon name={"smartphone"} className="w-2.5 h-2.5 mr-1" />{o._count.whatsappAccounts}</span>
+                        <span><Icon name={"forum"} className="w-2.5 h-2.5 mr-1" />{o._count.conversations}</span>
+                      </div>
+                    </div>
+                  </button>
+                  <div className="mt-3 flex justify-end"><Actions o={o} /></div>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <Pagination page={page} limit={LIMIT} total={data?.total ?? 0} onChange={setPage} />
+      </Card>
+
+      {formOrg && <OrgFormModal org={formOrg === "new" ? null : formOrg} onClose={() => setFormOrg(null)} onSaved={() => { refresh(); setFormOrg(null); }} />}
+      {viewOrg && <OrgDetailModal org={viewOrg} onClose={() => setViewOrg(null)} onChanged={refresh} />}
+
+      <ConfirmDialog
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        onConfirm={doDelete}
+        loading={busy}
+        title="Delete organization?"
+        confirmLabel="Delete forever"
+        confirmText={deleting?.slug}
+        message={<>All contacts, conversations, templates, broadcasts and WhatsApp numbers of <b>{deleting?.name}</b> will be permanently deleted.</>}
+      />
+    </Page>
+  );
+}
+
+function OrgFormModal({ org, onClose, onSaved }: { org: OrgRow | null; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState({
+    name: org?.name ?? "", slug: org?.slug ?? "", website: org?.website ?? "",
+    plan: (org?.plan ?? "TRIAL") as PlanName,
+    trialEndsAt: org?.trialEndsAt ? org.trialEndsAt.slice(0, 10) : "",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const payload = { ...form, trialEndsAt: form.trialEndsAt || null };
+      if (org) await axios.patch(`/api/admin/organizations/${org.id}`, payload);
+      else await axios.post("/api/admin/organizations", payload);
+      toast.success(org ? "Organization updated" : "Organization created");
+      onSaved();
+    } catch (e) { toast.error(apiError(e)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Modal
+      open onClose={onClose} icon={org ? "edit" : "add"}
+      title={org ? "Edit organization" : "New organization"} description={org?.slug}
+      footer={<>
+        <Button variant="secondary" className="flex-1" onClick={onClose}>Cancel</Button>
+        <Button type="submit" form="org-form" className="flex-1" loading={saving}>{org ? "Save changes" : "Create"}</Button>
+      </>}
+    >
+      <form id="org-form" onSubmit={submit} className="space-y-4">
+        <Field label="Name"><input className={inputCls} value={form.name} onChange={(e) => set("name", e.target.value)} required maxLength={120} /></Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Slug" hint={org ? "Changing the slug can break existing links." : "Leave empty to generate from name."}>
+            <input className={`${inputCls} font-mono`} value={form.slug} onChange={(e) => set("slug", e.target.value)} placeholder="acme-inc" />
+          </Field>
+          <Field label="Website"><input type="url" className={inputCls} value={form.website} onChange={(e) => set("website", e.target.value)} placeholder="https://" /></Field>
+        </div>
+        <Field label="Plan">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {PLANS.map((p) => (
+              <button type="button" key={p} onClick={() => set("plan", p)}
+                className={`rounded-xl border-2 px-3 py-2.5 text-xs font-bold transition-colors ${form.plan === p ? "border-green-500 bg-green-50 text-green-700" : "border-slate-200 text-slate-600 hover:border-slate-300"}`}>
+                {p}
+              </button>
+            ))}
+          </div>
+        </Field>
+        {form.plan === "TRIAL" && (
+          <Field label="Trial ends on"><input type="date" className={inputCls} value={form.trialEndsAt} onChange={(e) => set("trialEndsAt", e.target.value)} /></Field>
+        )}
+      </form>
+    </Modal>
+  );
+}
+
+const WA_EMPTY = { phoneNumber: "", phoneNumberId: "", displayName: "", wabaId: "", accessToken: "" };
+
+interface OrgDetail {
+  members: { id: string; role: string; user: { id: string; name: string | null; email: string; isActive: boolean } }[];
+  whatsappAccounts: { id: string; phoneNumber: string; phoneNumberId: string; wabaId: string; displayName: string; isActive: boolean }[];
+  subscription: { status: string } | null;
+  _count: { conversations: number; broadcasts: number; contacts: number; templates: number };
+}
+
+function OrgDetailModal({ org, onClose, onChanged }: { org: OrgRow; onClose: () => void; onChanged: () => void }) {
+  const { can } = useAdmin();
+  const [tab, setTab] = useState<"overview" | "members" | "whatsapp">("overview");
+  const [waForm, setWaForm] = useState<typeof WA_EMPTY | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState<OrgDetail["whatsappAccounts"][number] | null>(null);
+
+  const { data, refetch, isLoading } = useQuery({
+    queryKey: ["admin-org-detail", org.id],
+    queryFn: () => axios.get(`/api/admin/organizations/${org.id}`).then((r) => r.data.organization as OrgDetail),
+  });
+
+  const afterChange = () => { refetch(); onChanged(); };
+
+  const addWa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!waForm) return;
+    setSaving(true);
+    try {
+      await axios.post(`/api/admin/organizations/${org.id}/whatsapp`, waForm);
+      toast.success("WhatsApp number connected");
+      setWaForm(null);
+      afterChange();
+    } catch (e) { toast.error(apiError(e)); }
+    finally { setSaving(false); }
+  };
+
+  const toggleWa = async (acc: OrgDetail["whatsappAccounts"][number]) => {
+    try {
+      await axios.patch(`/api/admin/organizations/${org.id}/whatsapp`, { isActive: !acc.isActive }, { params: { accountId: acc.id } });
+      toast.success(acc.isActive ? "Number disabled" : "Number enabled");
+      afterChange();
+    } catch (e) { toast.error(apiError(e)); }
+  };
+
+  const removeWa = async () => {
+    if (!removing) return;
+    try {
+      await axios.delete(`/api/admin/organizations/${org.id}/whatsapp`, { params: { accountId: removing.id } });
+      toast.success("Number removed");
+      setRemoving(null);
+      afterChange();
+    } catch (e) { toast.error(apiError(e)); }
+  };
+
+  const stats = data ? [
+    { label: "Contacts", value: data._count.contacts, icon: "contacts" },
+    { label: "Conversations", value: data._count.conversations, icon: "forum" },
+    { label: "Broadcasts", value: data._count.broadcasts, icon: "campaign" },
+    { label: "Templates", value: data._count.templates, icon: "apartment" },
+  ] : [];
+
+  return (
+    <Modal open onClose={onClose} title={org.name} description={`${org.slug} · ${org.plan}`} icon={"apartment"} size="lg">
+      <div className="space-y-4">
+        <FilterTabs value={tab} onChange={setTab} options={[
+          { value: "overview", label: "Overview" },
+          { value: "members", label: `Members (${org._count.members})` },
+          { value: "whatsapp", label: `WhatsApp (${data?.whatsappAccounts.length ?? org._count.whatsappAccounts})` },
+        ]} />
+
+        {isLoading || !data ? <SkeletonRows rows={3} /> : tab === "overview" ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              {stats.map((s) => (
+                <div key={s.label} className="rounded-xl bg-slate-50 p-3">
+                  <Icon name={s.icon} className="w-3 h-3 text-slate-400" />
+                  <p className="mt-1.5 text-lg font-bold text-slate-900 tabular-nums">{s.value.toLocaleString()}</p>
+                  <p className="text-[11px] text-slate-500">{s.label}</p>
                 </div>
               ))}
             </div>
-
-            {!showWaForm ? (
-              <button onClick={() => setShowWaForm(true)}
-                className="w-full py-2.5 text-sm font-semibold text-white rounded-xl flex items-center justify-center gap-2 transition-opacity hover:opacity-90"
-                style={{ background: "#25D366" }}>
-                <FontAwesomeIcon icon={faPlus} className="w-3.5 h-3.5" />
-                Connect New Number
-              </button>
-            ) : (
-              <form onSubmit={handleWaAdd} className="space-y-3 border-t pt-4 border-slate-100">
-                <p className="text-sm font-semibold text-slate-900">Connect WhatsApp Number</p>
-                {[
-                  { key: "phoneNumber",   label: "Phone Number",      placeholder: "919876543210 (no +)" },
-                  { key: "phoneNumberId", label: "Phone Number ID ★", placeholder: "From Meta API Setup" },
-                  { key: "displayName",   label: "Display Name",      placeholder: "Business Name" },
-                  { key: "wabaId",        label: "WABA ID",           placeholder: "WhatsApp Business Account ID" },
-                ].map((f) => (
-                  <div key={f.key} className="space-y-1">
-                    <label className="text-xs font-medium text-slate-600">{f.label}</label>
-                    <input required value={(waForm as any)[f.key]}
-                      onChange={(e) => setWaForm({ ...waForm, [f.key]: e.target.value })}
-                      placeholder={f.placeholder}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white" />
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              <div><dt className="text-xs text-slate-400">Subscription</dt><dd className="font-semibold text-slate-800">{data.subscription?.status ?? "—"}</dd></div>
+              <div><dt className="text-xs text-slate-400">Trial ends</dt><dd className="font-semibold text-slate-800">{org.trialEndsAt ? new Date(org.trialEndsAt).toLocaleDateString() : "—"}</dd></div>
+              <div><dt className="text-xs text-slate-400">Website</dt><dd className="font-semibold text-slate-800 truncate">{org.website ?? "—"}</dd></div>
+              <div><dt className="text-xs text-slate-400">Created</dt><dd className="font-semibold text-slate-800">{new Date(org.createdAt).toLocaleDateString()}</dd></div>
+            </dl>
+          </div>
+        ) : tab === "members" ? (
+          data.members.length === 0 ? <p className="py-8 text-center text-sm text-slate-400">No members</p> : (
+            <ul className="divide-y divide-slate-100 rounded-xl border border-slate-100">
+              {data.members.map((m) => (
+                <li key={m.id} className="flex items-center gap-3 px-3.5 py-3">
+                  <Avatar name={m.user.name ?? m.user.email} size="sm" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-slate-800 truncate">{m.user.name ?? "—"}</p>
+                    <p className="text-xs text-slate-400 truncate">{m.user.email}</p>
                   </div>
-                ))}
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-600">Permanent Access Token ★</label>
-                  <textarea required value={waForm.accessToken}
-                    onChange={(e) => setWaForm({ ...waForm, accessToken: e.target.value })}
-                    placeholder="EAAxxxxxxxx..."
-                    rows={2}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-500 bg-white" />
+                  <Badge tone="blue">{m.role.replace(/_/g, " ")}</Badge>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : (
+          <div className="space-y-3">
+            {data.whatsappAccounts.length === 0 && !waForm && (
+              <EmptyState icon={"smartphone"} title="No WhatsApp numbers" description="Connect a number using its Meta Phone Number ID." />
+            )}
+            {data.whatsappAccounts.map((acc) => (
+              <div key={acc.id} className="flex items-center gap-3 rounded-xl border border-slate-200 p-3.5">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${acc.isActive ? "bg-green-50 text-green-600" : "bg-slate-100 text-slate-400"}`}>
+                  <Icon name={"wifi"} className="w-3.5 h-3.5" />
                 </div>
-                <div className="flex gap-2 pt-1">
-                  <button type="button" onClick={() => setShowWaForm(false)}
-                    className="flex-1 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">Cancel</button>
-                  <button type="submit" disabled={waSaving}
-                    className="flex-1 py-2 text-sm text-white rounded-lg font-semibold disabled:opacity-60 hover:opacity-90"
-                    style={{ background: "#25D366" }}>
-                    {waSaving ? "Connecting..." : "Connect"}
-                  </button>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-800 truncate">{acc.displayName} <span className="font-normal text-slate-400">+{acc.phoneNumber}</span></p>
+                  <p className="text-[11px] text-slate-400 font-mono truncate">ID {acc.phoneNumberId} · WABA {acc.wabaId}</p>
+                </div>
+                {can("orgs:write") && (
+                  <div className="flex gap-1.5">
+                    <IconButton icon={acc.isActive ? "cancel" : "check_circle"} label={acc.isActive ? "Disable" : "Enable"} tone={acc.isActive ? "warn" : "success"} onClick={() => toggleWa(acc)} />
+                    <IconButton icon={"delete"} label="Remove number" tone="danger" onClick={() => setRemoving(acc)} />
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {can("orgs:write") && (waForm ? (
+              <form onSubmit={addWa} className="rounded-xl border border-green-200 bg-green-50/40 p-4 space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Phone number"><input className={inputCls} value={waForm.phoneNumber} onChange={(e) => setWaForm({ ...waForm, phoneNumber: e.target.value })} placeholder="919876543210" required /></Field>
+                  <Field label="Display name"><input className={inputCls} value={waForm.displayName} onChange={(e) => setWaForm({ ...waForm, displayName: e.target.value })} /></Field>
+                  <Field label="Phone Number ID"><input className={`${inputCls} font-mono`} value={waForm.phoneNumberId} onChange={(e) => setWaForm({ ...waForm, phoneNumberId: e.target.value })} required /></Field>
+                  <Field label="WABA ID"><input className={`${inputCls} font-mono`} value={waForm.wabaId} onChange={(e) => setWaForm({ ...waForm, wabaId: e.target.value })} required /></Field>
+                </div>
+                <Field label="Permanent access token" hint="System User token with whatsapp_business_messaging & whatsapp_business_management.">
+                  <input type="password" className={`${inputCls} font-mono`} value={waForm.accessToken} onChange={(e) => setWaForm({ ...waForm, accessToken: e.target.value })} required autoComplete="off" />
+                </Field>
+                <div className="flex gap-2 justify-end">
+                  <Button type="button" variant="secondary" onClick={() => setWaForm(null)}>Cancel</Button>
+                  <Button type="submit" loading={saving}>Connect number</Button>
                 </div>
               </form>
-            )}
+            ) : (
+              <Button variant="secondary" icon={"add"} className="w-full" onClick={() => setWaForm({ ...WA_EMPTY })}>Connect WhatsApp number</Button>
+            ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Change Plan Modal */}
-      {editOrg && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm space-y-5">
-            <div>
-              <h3 className="text-base font-bold text-slate-900">Change Plan</h3>
-              <p className="text-sm text-slate-500 mt-1">{editOrg.name}</p>
-            </div>
-            <div className="space-y-2">
-              {PLANS.map((plan) => {
-                const s = PLAN_STYLE[plan];
-                const selected = planValue === plan;
-                return (
-                  <button key={plan} onClick={() => setPlanValue(plan)}
-                    className="w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition-all"
-                    style={{ borderColor: selected ? s.dot : "#e2e8f0", background: selected ? s.bg : "white" }}>
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-2 h-2 rounded-full" style={{ background: s.dot }} />
-                      <span className="text-sm font-semibold" style={{ color: s.text }}>{plan}</span>
-                    </div>
-                    {selected && <FontAwesomeIcon icon={faCircleCheck} className="w-4 h-4" style={{ color: s.dot }} />}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setEditOrg(null)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50">
-                Cancel
-              </button>
-              <button onClick={savePlan} disabled={saving}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-60 hover:opacity-90"
-                style={{ background: "#25D366" }}>
-                {saving ? "Saving..." : "Update Plan"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <ConfirmDialog
+        open={!!removing} onClose={() => setRemoving(null)} onConfirm={removeWa}
+        title="Remove WhatsApp number?" confirmLabel="Remove"
+        message={<>Messages will stop flowing for <b>+{removing?.phoneNumber}</b>. Existing conversations are kept.</>}
+      />
+    </Modal>
   );
 }

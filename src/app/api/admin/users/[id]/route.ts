@@ -1,47 +1,168 @@
+import bcrypt from "bcryptjs";
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { audit, requireAdmin, type AdminContext } from "@/lib/admin-auth";
+import { hasPermission, type AdminRoleInfo, type Permission } from "@/lib/rbac";
+import { ROLE_SELECT, activeSuperAdminCount, resolveAdminRole, toRoleInfo } from "@/lib/admin-roles";
+import { EMAIL_RE, MEMBER_ROLES, USER_SELECT, validatePassword, type MemberRoleName } from "@/lib/admin-users";
 
-async function requireSuperAdmin() {
-  const session = await getServerSession(authOptions);
-  if (!session) return null;
-  const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { isSuperAdmin: true } });
-  return user?.isSuperAdmin ? session : null;
+type Params = { params: Promise<{ id: string }> };
+
+const deny = (error: string, status = 403) => NextResponse.json({ error }, { status });
+
+/** Non-super-admins may only act on users whose role level is strictly below theirs. */
+function outranks(ctx: AdminContext, target: AdminRoleInfo | null) {
+  if (ctx.role.key === "SUPER_ADMIN") return true;
+  return !target || ctx.role.level > target.level;
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await requireSuperAdmin();
-  if (!session) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+const TARGET_SELECT = {
+  id: true, email: true, isActive: true, isSuperAdmin: true, adminRole: true, adminRoleId: true,
+  adminRoleDef: { select: ROLE_SELECT },
+} satisfies Prisma.UserSelect;
+
+function present(u: Prisma.UserGetPayload<{ select: typeof USER_SELECT }>) {
+  const { adminRoleDef, ...rest } = u;
+  return { ...rest, adminRoleInfo: adminRoleDef ? toRoleInfo(adminRoleDef) : null };
+}
+
+export async function GET(_req: NextRequest, { params }: Params) {
+  const { ctx, response } = await requireAdmin("users:read");
+  if (!ctx) return response;
   const { id } = await params;
-  const body = await req.json();
-  const { isSuperAdmin, isActive, role, organizationId } = body;
+  const user = await prisma.user.findUnique({ where: { id }, select: USER_SELECT });
+  if (!user) return deny("Not found", 404);
+  return NextResponse.json({ user: present(user) });
+}
 
-  const data: any = {};
-  if (isSuperAdmin !== undefined) data.isSuperAdmin = isSuperAdmin;
-  if (isActive !== undefined) data.isActive = isActive;
+export async function PATCH(req: NextRequest, { params }: Params) {
+  const { ctx, response } = await requireAdmin("users:read");
+  if (!ctx) return response;
+  const { id } = await params;
+  const body = (await req.json().catch(() => null)) ?? {};
 
-  const user = await prisma.user.update({ where: { id }, data });
+  const target = await prisma.user.findUnique({ where: { id }, select: TARGET_SELECT });
+  if (!target) return deny("Not found", 404);
 
-  // Update role within an organization if provided
-  if (role && organizationId) {
-    await prisma.organizationMember.updateMany({
-      where: { userId: id, organizationId },
-      data: { role },
-    });
+  const targetRole = await resolveAdminRole(target);
+  const isSelf = target.id === ctx.userId;
+  if (!isSelf && !outranks(ctx, targetRole)) return deny("You cannot modify a user with an equal or higher admin role");
+
+  const need = (p: Permission) => (hasPermission(ctx.role, p) ? null : deny(`Your role doesn't have the "${p}" permission`));
+
+  const data: Prisma.UserUpdateInput = {};
+  const changes: Record<string, unknown> = {};
+  let revokeSessions = false;
+
+  if (body.name !== undefined || body.email !== undefined || body.memberRole !== undefined) {
+    const d = need("users:write"); if (d) return d;
+  }
+  if (body.name !== undefined) {
+    const name = String(body.name).trim().slice(0, 100);
+    if (!name) return deny("Name cannot be empty", 400);
+    data.name = changes.name = name;
+  }
+  if (body.email !== undefined) {
+    const email = String(body.email).toLowerCase().trim();
+    if (!EMAIL_RE.test(email)) return deny("Invalid email", 400);
+    data.email = changes.email = email;
   }
 
-  return NextResponse.json({ user });
+  if (body.isActive !== undefined) {
+    const d = need("users:suspend"); if (d) return d;
+    const isActive = Boolean(body.isActive);
+    if (isSelf && !isActive) return deny("You cannot suspend yourself", 400);
+    if (!isActive && targetRole?.key === "SUPER_ADMIN" && (await activeSuperAdminCount()) <= 1) {
+      return deny("Cannot suspend the last active Super Admin", 400);
+    }
+    data.isActive = changes.isActive = isActive;
+    if (!isActive) revokeSessions = true;
+  }
+
+  if (body.adminRoleId !== undefined) {
+    const d = need("admins:manage"); if (d) return d;
+    if (isSelf) return deny("You cannot change your own admin role", 400);
+    const newRoleId = body.adminRoleId ? String(body.adminRoleId) : null;
+    let newRole: { id: string; key: string; name: string; level: number } | null = null;
+    if (newRoleId) {
+      newRole = await prisma.adminRoleDefinition.findUnique({ where: { id: newRoleId }, select: { id: true, key: true, name: true, level: true } });
+      if (!newRole) return deny("Admin role not found", 404);
+      if (ctx.role.key !== "SUPER_ADMIN" && newRole.level >= ctx.role.level) {
+        return deny(`You can only assign roles below your own level (${ctx.role.name})`);
+      }
+    }
+    if (targetRole?.key === "SUPER_ADMIN" && newRole?.key !== "SUPER_ADMIN" && (await activeSuperAdminCount()) <= 1) {
+      return deny("Cannot demote the last Super Admin", 400);
+    }
+    data.adminRoleDef = newRole ? { connect: { id: newRole.id } } : { disconnect: true };
+    data.adminRole = null; // legacy column no longer used once a role is set explicitly
+    data.isSuperAdmin = newRole?.key === "SUPER_ADMIN";
+    changes.adminRole = { from: targetRole?.name ?? null, to: newRole?.name ?? null };
+    revokeSessions = true;
+  }
+
+  if (body.password !== undefined) {
+    const d = need("users:password"); if (d) return d;
+    const pwError = validatePassword(body.password);
+    if (pwError) return deny(pwError, 400);
+    data.passwordHash = await bcrypt.hash(body.password, 12);
+    changes.password = "reset";
+    revokeSessions = true;
+  }
+
+  if (body.unlock || body.revokeSessions) {
+    const d = need("users:sessions"); if (d) return d;
+    if (body.unlock) { data.failedLoginAttempts = 0; data.lockedUntil = null; changes.unlock = true; }
+    if (body.revokeSessions) { revokeSessions = true; changes.revokeSessions = true; }
+  }
+  if (revokeSessions) data.sessionsRevokedAt = new Date();
+
+  let memberRoleChange: { organizationId: string; role: MemberRoleName } | null = null;
+  if (body.memberRole !== undefined && body.organizationId) {
+    if (!MEMBER_ROLES.includes(body.memberRole)) return deny("Invalid organization role", 400);
+    memberRoleChange = { organizationId: String(body.organizationId), role: body.memberRole };
+    changes.memberRole = memberRoleChange;
+  }
+
+  if (Object.keys(changes).length === 0) return deny("Nothing to update", 400);
+
+  try {
+    const user = await prisma.$transaction(async (tx) => {
+      if (memberRoleChange) {
+        await tx.organizationMember.updateMany({
+          where: { userId: id, organizationId: memberRoleChange.organizationId },
+          data: { role: memberRoleChange.role },
+        });
+      }
+      return tx.user.update({ where: { id }, data, select: USER_SELECT });
+    });
+    await audit(ctx, "user.update", { entity: "User", entityId: id, metadata: { target: target.email, ...changes } as Prisma.InputJsonValue });
+    return NextResponse.json({ user: present(user) });
+  } catch (e) {
+    if ((e as { code?: string }).code === "P2002") return deny("Email already in use", 409);
+    console.error("[admin] user update failed", e);
+    return deny("Update failed", 500);
+  }
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await requireSuperAdmin();
-  if (!session) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+export async function DELETE(_req: NextRequest, { params }: Params) {
+  const { ctx, response } = await requireAdmin("users:delete");
+  if (!ctx) return response;
   const { id } = await params;
 
-  // Prevent deleting self
-  if (id === session.user.id) return NextResponse.json({ error: "Cannot delete yourself" }, { status: 400 });
+  if (id === ctx.userId) return deny("You cannot delete yourself", 400);
+
+  const target = await prisma.user.findUnique({ where: { id }, select: TARGET_SELECT });
+  if (!target) return deny("Not found", 404);
+
+  const targetRole = await resolveAdminRole(target);
+  if (!outranks(ctx, targetRole)) return deny("You cannot delete a user with an equal or higher admin role");
+  if (targetRole?.key === "SUPER_ADMIN" && (await activeSuperAdminCount()) <= 1) {
+    return deny("Cannot delete the last Super Admin", 400);
+  }
 
   await prisma.user.delete({ where: { id } });
+  await audit(ctx, "user.delete", { entity: "User", entityId: id, metadata: { email: target.email, adminRole: targetRole?.name ?? null } });
   return NextResponse.json({ success: true });
 }

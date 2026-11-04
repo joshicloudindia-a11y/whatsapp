@@ -1,5 +1,6 @@
 "use client";
 
+import { Icon } from "@/components/ui/icon";
 import { useCallback, useState, useEffect } from "react";
 import {
   ReactFlow,
@@ -20,14 +21,14 @@ import axios from "axios";
 import { toast } from "sonner";
 
 const NODE_TYPES_CONFIG = [
-  { type: "sendMessage", label: "Send Message", color: "#25D366", icon: "💬" },
-  { type: "askQuestion", label: "Ask Question", color: "#3b82f6", icon: "❓" },
-  { type: "condition", label: "Condition", color: "#f59e0b", icon: "🔀" },
-  { type: "setAttribute", label: "Set Attribute", color: "#8b5cf6", icon: "🏷" },
-  { type: "assignAgent", label: "Assign Agent", color: "#06b6d4", icon: "👤" },
-  { type: "httpRequest", label: "HTTP Request", color: "#ef4444", icon: "🌐" },
-  { type: "delay", label: "Delay", color: "#64748b", icon: "⏱" },
-  { type: "endFlow", label: "End Flow", color: "#374151", icon: "🏁" },
+  { type: "sendMessage", label: "Send Message", color: "#25D366", icon: "chat" },
+  { type: "askQuestion", label: "Ask Question", color: "#3b82f6", icon: "help" },
+  { type: "condition", label: "Condition", color: "#f59e0b", icon: "alt_route" },
+  { type: "setAttribute", label: "Set Attribute", color: "#8b5cf6", icon: "label" },
+  { type: "assignAgent", label: "Assign Agent", color: "#06b6d4", icon: "support_agent" },
+  { type: "httpRequest", label: "HTTP Request", color: "#ef4444", icon: "http" },
+  { type: "delay", label: "Delay", color: "#64748b", icon: "timer" },
+  { type: "endFlow", label: "End Flow", color: "#374151", icon: "flag" },
 ];
 
 function NodeCard({ data }: { data: any }) {
@@ -39,7 +40,7 @@ function NodeCard({ data }: { data: any }) {
     >
       <div className="px-3 py-2 rounded-t-xl text-white text-xs font-semibold flex items-center gap-2"
         style={{ background: config.color }}>
-        <span>{config.icon}</span>
+        <Icon name={config.icon} className="w-4 h-4" />
         <span>{config.label}</span>
       </div>
       <div className="px-3 py-2 text-slate-700 text-xs">
@@ -133,7 +134,7 @@ export default function ChatbotBuilder({ chatbotId }: { chatbotId: string }) {
             onClick={() => addNode(n.type)}
             className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-slate-50 transition-colors text-slate-700"
           >
-            <span>{n.icon}</span>
+            <Icon name={n.icon} className="w-4 h-4" />
             <span>{n.label}</span>
           </button>
         ))}

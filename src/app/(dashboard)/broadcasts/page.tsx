@@ -56,7 +56,7 @@ export default function BroadcastsPage() {
   };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-4">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
       <div className="flex justify-end">
         <button
           onClick={() => setShowCreate(true)}
@@ -100,7 +100,7 @@ export default function BroadcastsPage() {
               </div>
 
               {/* Stats */}
-              <div className="mt-4 grid grid-cols-5 gap-3">
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                 {[
                   { label: "Total", value: b.totalCount, color: "text-slate-700" },
                   { label: "Sent", value: b.sentCount, color: "text-blue-600" },
@@ -144,7 +144,7 @@ export default function BroadcastsPage() {
               <div className="space-y-1">
                 <label className="text-xs font-medium text-slate-600">Campaign Name</label>
                 <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="Summer Sale 2024"
+                  placeholder={`Summer Sale ${new Date().getFullYear()}`}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
               </div>
               <div className="space-y-1">
