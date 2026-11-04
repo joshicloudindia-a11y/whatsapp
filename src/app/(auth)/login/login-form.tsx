@@ -141,10 +141,6 @@ export default function LoginForm() {
         Create a free account
       </Link>
 
-      <p className="text-center text-[11px] text-slate-400 flex items-center justify-center gap-1.5">
-        <Icon name={"admin_panel_settings"} className="w-3 h-3" />
-        Platform admin? <Link href="/admin/login" className="font-semibold text-slate-500 hover:text-slate-700">Sign in here</Link>
-      </p>
     </div>
   );
 }
