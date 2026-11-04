@@ -46,8 +46,9 @@ export function HeroMockup() {
           <div className="flex items-center gap-2.5 bg-[#075E54] px-3.5 pt-5 pb-3 text-white">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/20 text-xs font-bold">SK</span>
             <div className="min-w-0 flex-1">
-              <p className="flex items-center gap-1 truncate text-sm font-semibold">
-                Sharma Kurti House <Icon name="verified" filled className="w-3.5 h-3.5 text-[#25D366]" />
+              <p className="flex items-center gap-1 text-sm font-semibold leading-5">
+                <span className="truncate">Sharma Kurtis</span>
+                <Icon name="verified" filled className="w-4 h-4 shrink-0 text-[#25D366]" title="Verified business" />
               </p>
               <p className="text-[11px] text-white/75">Business account · online</p>
             </div>

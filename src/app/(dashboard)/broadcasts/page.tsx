@@ -530,7 +530,10 @@ function PhonePreview({ template, businessName, valueFor, placeholders, recipien
           <Icon name="arrow_back" className="w-4 h-4 opacity-80" />
           <span className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center text-[11px] font-bold">{businessName[0]?.toUpperCase()}</span>
           <div className="min-w-0 flex-1 leading-tight">
-            <p className="text-[12px] font-semibold truncate flex items-center gap-1">{businessName} <Icon name="verified" filled className="w-3 h-3 text-[#25D366]" /></p>
+            <p className="text-[12px] font-semibold flex items-center gap-1 leading-4">
+              <span className="truncate">{businessName}</span>
+              <Icon name="verified" filled className="w-3.5 h-3.5 shrink-0 text-[#25D366]" />
+            </p>
             <p className="text-[9px] opacity-75">Business account</p>
           </div>
           <Icon name="more_horiz" className="w-4 h-4 opacity-80" />
