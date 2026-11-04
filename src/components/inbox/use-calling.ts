@@ -54,6 +54,32 @@ export function usePendingCalls(enabled = true) {
   });
 }
 
+// ─── ChatFlow video meetings (self-hosted WebRTC rooms, /api/meetings) ──────────
+
+export interface CreatedMeeting {
+  room: { code: string; title: string; status: string; expiresAt: string; conversationId?: string | null };
+  /** Agent room inside the dashboard (/meetings/<code>). */
+  joinUrl: string;
+  /** Customer link (/meet/<code>?t=<guestToken>). */
+  guestUrl: string;
+}
+
+/** Creates a ChatFlow meeting room linked to the conversation. */
+export function createMeeting(conversationId: string) {
+  return axios.post("/api/meetings", { conversationId }).then((r) => r.data as CreatedMeeting);
+}
+
+/** Sends the guest link as a WhatsApp text (24 h window only; errors carry `code`, e.g. WINDOW_CLOSED). */
+export function sendMeetingLink(code: string) {
+  return axios.post(`/api/meetings/${encodeURIComponent(code)}/send-link`, {}).then((r) => r.data as { guestUrl: string });
+}
+
+/** Agent room path for a meeting code. */
+export const meetingPath = (code: string) => `/meetings/${encodeURIComponent(code)}`;
+
+/** External meeting links (Jitsi / Zoom / Meet) are offered only as a secondary option when this env is set. */
+export const EXTERNAL_VIDEO_ENABLED = !!process.env.NEXT_PUBLIC_VIDEO_MEET_BASE;
+
 const VIDEO_BASE_KEY = "chatflow.videoMeetBase";
 export const DEFAULT_VIDEO_BASE = process.env.NEXT_PUBLIC_VIDEO_MEET_BASE || "https://meet.jit.si/";
 

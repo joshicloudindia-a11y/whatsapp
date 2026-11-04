@@ -846,3 +846,44 @@ model PlanConfig {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VIDEO MEETINGS (self-hosted WebRTC; signaling over HTTP polling)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A video meeting room. Guests join with `code` + `guestToken` (no login).
+model MeetingRoom {
+  id             String    @id @default(cuid())
+  organizationId String
+  conversationId String?
+  createdById    String?
+  code           String    @unique
+  guestToken     String
+  title          String
+  status         String    @default("ACTIVE") // ACTIVE | ENDED
+  maxParticipants Int      @default(4)
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime
+  endedAt        DateTime?
+
+  signals MeetingSignal[]
+
+  @@index([organizationId, createdAt])
+  @@index([conversationId])
+}
+
+/// Short-lived WebRTC signaling + presence messages (join, offer, answer, ice, leave, chat, heartbeat).
+model MeetingSignal {
+  id        String   @id @default(cuid())
+  roomId    String
+  fromPeer  String
+  toPeer    String?
+  type      String
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  room MeetingRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+  @@index([createdAt])
+}

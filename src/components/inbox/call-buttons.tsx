@@ -13,7 +13,10 @@ import {
   type PendingCall, type ServerCall,
 } from "./call-store";
 import { CallPanel, IncomingCallModal, formatClock } from "./call-panel";
-import { DEFAULT_VIDEO_BASE, getVideoBase, newMeetingUrl, setVideoBase, useCallingStatus, usePendingCalls } from "./use-calling";
+import {
+  DEFAULT_VIDEO_BASE, EXTERNAL_VIDEO_ENABLED, createMeeting, getVideoBase, meetingPath, newMeetingUrl, sendMeetingLink, setVideoBase,
+  useCallingStatus, usePendingCalls, type CreatedMeeting,
+} from "./use-calling";
 
 const apiErr = (e: unknown, f = "Something went wrong") =>
   (e as { response?: { data?: { error?: string } } })?.response?.data?.error ?? (e instanceof Error ? e.message : f);
@@ -35,7 +38,7 @@ export interface CallButtonsContact {
 /**
  * Phone + video buttons for the conversation header. The phone menu offers a WhatsApp voice call when the number
  * is calling-enabled and the customer granted permission (else a permission request), plus "Call by phone".
- * The video menu sends a meeting link (Jitsi by default) inside the 24 h window.
+ * The video menu starts a ChatFlow video meeting (self-hosted WebRTC) and sends the customer the link on WhatsApp.
  */
 export function CallButtons({ conversationId, contact, windowOpen }: { conversationId: string; contact: CallButtonsContact; windowOpen: boolean }) {
   const [menu, setMenu] = useState<null | "voice" | "video">(null);
@@ -245,7 +248,138 @@ function MenuItem({ icon, iconClass, label, hint, onClick, disabled }: { icon: s
   );
 }
 
+/**
+ * Video menu: starts a ChatFlow meeting (self-hosted WebRTC room), sends the guest link on WhatsApp (24 h window)
+ * and opens the agent room in a new tab. Window closed → the room is still created and the link can be copied.
+ */
 function VideoMenu({ conversationId, windowOpen }: { conversationId: string; windowOpen: boolean }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState<null | "start" | "send">(null);
+  const [meeting, setMeeting] = useState<CreatedMeeting | null>(null);
+  const [sent, setSent] = useState(false);
+  const [closed, setClosed] = useState(!windowOpen);
+  const [showExternal, setShowExternal] = useState(false);
+
+  const refreshThread = () => {
+    qc.invalidateQueries({ queryKey: ["messages", conversationId] });
+    qc.invalidateQueries({ queryKey: ["conversations"] });
+  };
+
+  /** Sends the link; returns true when sent. A closed window flips the menu to "copy link". */
+  const sendLink = async (code: string) => {
+    try {
+      await sendMeetingLink(code);
+      setSent(true);
+      toast.success("Meeting link sent on WhatsApp");
+      refreshThread();
+      return true;
+    } catch (e) {
+      const errCode = (e as { response?: { data?: { code?: string } } })?.response?.data?.code;
+      if (errCode === "WINDOW_CLOSED") {
+        setClosed(true);
+        toast.message("The 24-hour window is closed. Copy the link and share it another way.");
+      } else {
+        toast.error(apiErr(e, "Couldn't send the link"));
+      }
+      return false;
+    }
+  };
+
+  const start = async () => {
+    // Open the tab synchronously (inside the click) so popup blockers allow it; navigate once the room exists.
+    const tab = window.open("about:blank", "_blank");
+    setBusy("start");
+    try {
+      const m = await createMeeting(conversationId);
+      setMeeting(m);
+      if (tab) {
+        tab.opener = null;
+        tab.location.href = meetingPath(m.room.code);
+      }
+      if (!closed) await sendLink(m.room.code);
+    } catch (e) {
+      tab?.close();
+      toast.error(apiErr(e, "Couldn't start the meeting"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const resend = async () => {
+    if (!meeting) return;
+    setBusy("send");
+    await sendLink(meeting.room.code);
+    setBusy(null);
+  };
+
+  const copy = () => {
+    if (!meeting) return;
+    navigator.clipboard?.writeText(meeting.guestUrl).then(() => toast.success("Link copied"), () => toast.error("Couldn't copy"));
+  };
+
+  return (
+    <div className="space-y-2 p-1">
+      <p className="px-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Video meeting</p>
+      {closed && (
+        <p className="rounded-xl bg-amber-50 p-2.5 text-xs text-amber-900">
+          The 24-hour window is closed, so the link can&apos;t be sent on WhatsApp. Start the meeting and copy the link instead, or send an approved template first.
+        </p>
+      )}
+
+      {!meeting ? (
+        <>
+          <button type="button" onClick={start} disabled={!!busy}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#25D366] px-3 py-2.5 text-sm font-semibold text-white hover:bg-[#1fb857] disabled:opacity-60">
+            <Icon name="videocam" filled className="w-4 h-4" />
+            {busy === "start" ? "Starting…" : closed ? "Start meeting & get link" : "Start meeting & send link"}
+          </button>
+          <p className="px-1 text-[11px] text-slate-500">The customer joins from their browser, no app or login needed. Up to 4 people.</p>
+        </>
+      ) : (
+        <>
+          <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2">
+            <Icon name={sent ? "check_circle" : "videocam"} className={cn("w-4 h-4 shrink-0", sent ? "text-[#25D366]" : "text-slate-400")} />
+            <span className="min-w-0 flex-1 truncate text-xs text-slate-700" title={meeting.guestUrl}>{meeting.guestUrl}</span>
+            <button type="button" onClick={copy} aria-label="Copy customer link" title="Copy customer link"
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-500 hover:bg-white"><Icon name="content_copy" className="w-3.5 h-3.5" /></button>
+          </div>
+          <p className="px-1 text-[11px] text-slate-500">{sent ? "Link sent to the customer on WhatsApp." : "Share this link with the customer."}</p>
+          <a href={meetingPath(meeting.room.code)} target="_blank" rel="noreferrer"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#25D366] px-3 py-2 text-sm font-semibold text-white hover:bg-[#1fb857]">
+            <Icon name="videocam" filled className="w-4 h-4" /> Open meeting
+          </a>
+          <div className="flex gap-2">
+            <button type="button" onClick={copy}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+              <Icon name="content_copy" className="w-3.5 h-3.5" /> Copy link
+            </button>
+            {!closed && (
+              <button type="button" onClick={resend} disabled={busy === "send"}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                <Icon name="send" className="w-3.5 h-3.5" /> {busy === "send" ? "Sending…" : sent ? "Send again" : "Send on WhatsApp"}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
+      {EXTERNAL_VIDEO_ENABLED && (
+        <div className="border-t border-slate-100 pt-1">
+          {showExternal ? (
+            <ExternalLinkMenu conversationId={conversationId} windowOpen={windowOpen} />
+          ) : (
+            <button type="button" onClick={() => setShowExternal(true)} className="flex items-center gap-1 px-1 py-1 text-[11px] font-semibold text-slate-500 hover:text-slate-700">
+              <Icon name="settings" className="w-3.5 h-3.5" /> Use an external meeting link instead
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Secondary: send an external meeting link (Jitsi / Zoom / Meet) – only when NEXT_PUBLIC_VIDEO_MEET_BASE is set. */
+function ExternalLinkMenu({ conversationId, windowOpen }: { conversationId: string; windowOpen: boolean }) {
   const qc = useQueryClient();
   const [url, setUrl] = useState(() => (typeof window === "undefined" ? "" : newMeetingUrl()));
   const [sent, setSent] = useState<string | null>(null);
@@ -282,10 +416,7 @@ function VideoMenu({ conversationId, windowOpen }: { conversationId: string; win
 
   return (
     <div className="space-y-2 p-1">
-      <p className="px-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Video meeting</p>
-      {!windowOpen && (
-        <p className="rounded-xl bg-amber-50 p-2.5 text-xs text-amber-900">The 24-hour window is closed, so a link can&apos;t be sent as a normal message. Send an approved template first.</p>
-      )}
+      <p className="px-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">External meeting link</p>
       <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2">
         <Icon name="videocam" className="w-4 h-4 text-slate-400 shrink-0" />
         <span className="min-w-0 flex-1 truncate text-xs text-slate-700" title={url}>{url}</span>
