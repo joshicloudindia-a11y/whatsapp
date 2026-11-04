@@ -6,7 +6,10 @@ import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { useSession } from "next-auth/react";
-import { pusherClient, PUSHER_EVENTS, orgChannel, conversationChannel } from "@/lib/pusher";
+import { pusherClient, PUSHER_EVENTS, orgChannel, conversationChannel, REALTIME_ENABLED } from "@/lib/pusher";
+
+// Without Pusher, poll so new messages still appear.
+const POLL_MS = REALTIME_ENABLED ? false : 5000;
 import { cn, timeAgo, getInitials } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -44,6 +47,7 @@ export default function InboxPage() {
       axios
         .get(`/api/conversations?status=${status}&assignedTo=${filter === "all" ? "" : filter}&search=${search}`)
         .then((r) => r.data),
+    refetchInterval: POLL_MS,
   });
 
   const conversations = data?.conversations ?? [];
@@ -188,6 +192,7 @@ function ChatArea({ conversationId, onBack }: { conversationId: string; onBack: 
   const { data: msgData } = useQuery({
     queryKey: ["messages", conversationId],
     queryFn: () => axios.get(`/api/conversations/${conversationId}/messages`).then((r) => r.data),
+    refetchInterval: POLL_MS,
   });
 
   const { data: convData } = useQuery({

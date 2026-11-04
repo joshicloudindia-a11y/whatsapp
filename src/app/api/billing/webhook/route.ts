@@ -26,6 +26,9 @@ export async function POST(req: NextRequest) {
 
   if (!sig) return new Response("Missing signature", { status: 400 });
 
+  if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
+    return new Response("Stripe is not configured", { status: 503 });
+  }
   const stripe = getStripe();
   let event: Stripe.Event;
   try {

@@ -1,10 +1,19 @@
 import PusherClient from "pusher-js";
 
-// Server-side Pusher (lazy to avoid build-time errors)
-let _pusherServer: any = null;
+/**
+ * Real-time updates via Pusher are OPTIONAL.
+ * Without PUSHER_* / NEXT_PUBLIC_PUSHER_* env vars, server triggers are no-ops
+ * and the inbox falls back to polling (see REALTIME_ENABLED).
+ */
+const serverConfigured = !!(process.env.PUSHER_APP_ID && process.env.PUSHER_KEY && process.env.PUSHER_SECRET && process.env.PUSHER_CLUSTER);
+export const REALTIME_ENABLED = !!process.env.NEXT_PUBLIC_PUSHER_KEY;
 
-export function getPusherServer() {
+type Trigger = (channel: string | string[], event: string, data: unknown) => Promise<unknown>;
+let _pusherServer: { trigger: Trigger } | null = null;
+
+function getPusherServer() {
   if (!_pusherServer) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Pusher = require("pusher");
     _pusherServer = new Pusher({
       appId: process.env.PUSHER_APP_ID!,
@@ -14,18 +23,29 @@ export function getPusherServer() {
       useTLS: true,
     });
   }
-  return _pusherServer;
+  return _pusherServer!;
 }
 
 export const pusherServer = {
-  trigger: (...args: Parameters<any["trigger"]>) => getPusherServer().trigger(...args),
+  /** Never throws: real-time is best-effort and must not break message handling. */
+  trigger: async (channel: string | string[], event: string, data: unknown) => {
+    if (!serverConfigured) return;
+    try {
+      await getPusherServer().trigger(channel, event, data);
+    } catch (err) {
+      console.error("[pusher] trigger failed", event, err);
+    }
+  },
 };
 
-export const pusherClient = typeof window !== "undefined"
-  ? new PusherClient(process.env.NEXT_PUBLIC_PUSHER_KEY ?? "placeholder", {
-      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER ?? "ap2",
-    })
-  : null as any;
+type Channel = { bind: (event: string, cb: (data: unknown) => void) => void };
+const noopChannel: Channel = { bind: () => {} };
+const noopClient = { subscribe: (): Channel => noopChannel, unsubscribe: () => {} };
+
+export const pusherClient: { subscribe: (name: string) => Channel; unsubscribe: (name: string) => void } =
+  typeof window !== "undefined" && REALTIME_ENABLED
+    ? new PusherClient(process.env.NEXT_PUBLIC_PUSHER_KEY!, { cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER ?? "ap2" })
+    : noopClient;
 
 export const PUSHER_EVENTS = {
   NEW_MESSAGE: "new-message",
