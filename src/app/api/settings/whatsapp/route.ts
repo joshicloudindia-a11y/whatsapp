@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgMember } from "@/lib/org-auth";
-import { getPhoneNumberInfo, subscribeAppToWaba } from "@/lib/whatsapp";
+import { GRAPH_VERSION, getPhoneNumberInfo, subscribeAppToWaba } from "@/lib/whatsapp";
 
 const SELECT = {
   id: true, phoneNumber: true, phoneNumberId: true, displayName: true, wabaId: true,
@@ -26,6 +26,11 @@ export async function GET() {
       // The verify token is only shown to org admins.
       verifyToken: member.role === "ADMIN" ? process.env.META_WEBHOOK_VERIFY_TOKEN ?? null : null,
     },
+    // Meta Embedded Signup ("Connect with Facebook"). App ID and config ID are public values.
+    embeddedSignup:
+      member.role === "ADMIN" && process.env.META_APP_ID && process.env.META_EMBEDDED_SIGNUP_CONFIG_ID
+        ? { appId: process.env.META_APP_ID, configId: process.env.META_EMBEDDED_SIGNUP_CONFIG_ID, graphVersion: GRAPH_VERSION }
+        : null,
   });
 }
 

@@ -6,6 +6,8 @@ import axios from "axios";
 import { toast } from "sonner";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
+import { EmbeddedSignupButton, type EmbeddedSignupConfig, type EmbeddedSignupResult } from "@/components/settings/embedded-signup";
+import { BusinessProfilePanel } from "@/components/settings/business-profile";
 
 interface Account {
   id: string; phoneNumber: string; phoneNumberId: string; displayName: string; wabaId: string;
@@ -65,10 +67,12 @@ export function WhatsAppSettings({ isAdmin }: { isAdmin: boolean }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [tokenFor, setTokenFor] = useState<string | null>(null);
   const [newToken, setNewToken] = useState("");
+  const [profileFor, setProfileFor] = useState<string | null>(null);
+  const [signup, setSignup] = useState<EmbeddedSignupResult | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["whatsapp-accounts"],
-    queryFn: () => axios.get("/api/settings/whatsapp").then((r) => r.data as { accounts: Account[]; webhook: { callbackUrl: string; verifyToken: string | null } }),
+    queryFn: () => axios.get("/api/settings/whatsapp").then((r) => r.data as { accounts: Account[]; webhook: { callbackUrl: string; verifyToken: string | null }; embeddedSignup: EmbeddedSignupConfig | null }),
   });
   const accounts = data?.accounts ?? [];
   const { data: healthData } = useQuery({
@@ -82,6 +86,12 @@ export function WhatsAppSettings({ isAdmin }: { isAdmin: boolean }) {
     qc.invalidateQueries({ queryKey: ["whatsapp-accounts"] });
     qc.invalidateQueries({ queryKey: ["whatsapp-health"] });
     qc.invalidateQueries({ queryKey: ["onboarding"] });
+  };
+
+  const onSignup = (res: EmbeddedSignupResult) => {
+    setSignup(res);
+    toast.success(`${res.account.displayName} connected`);
+    refresh();
   };
 
   const connect = async (e: React.FormEvent) => {
@@ -131,11 +141,37 @@ export function WhatsAppSettings({ isAdmin }: { isAdmin: boolean }) {
           <p className="text-sm text-slate-500">Connect your Meta WhatsApp Business numbers to send and receive messages.</p>
         </div>
         {isAdmin && !showForm && (
-          <button onClick={() => setShowForm(true)} className="self-start inline-flex items-center gap-1.5 rounded-xl bg-[#25D366] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1fb857]">
-            <Icon name="add" className="w-4 h-4" /> Connect number
-          </button>
+          data?.embeddedSignup ? (
+            <div className="flex flex-wrap gap-2 self-start">
+              <EmbeddedSignupButton config={data.embeddedSignup} onConnected={onSignup} />
+              <button onClick={() => setShowForm(true)} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+                <Icon name="key" className="w-4 h-4" /> Manual setup
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setShowForm(true)} className="self-start inline-flex items-center gap-1.5 rounded-xl bg-[#25D366] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1fb857]">
+              <Icon name="add" className="w-4 h-4" /> Connect number
+            </button>
+          )
         )}
       </div>
+
+      {signup && (
+        <div className="rounded-2xl border border-green-200 bg-green-50/60 p-4 sm:p-5 space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <p className="flex items-center gap-2 text-sm font-bold text-slate-900"><Icon name="check_circle" filled className="w-5 h-5 text-green-600" /> {signup.account.displayName} is connected</p>
+            <button onClick={() => setSignup(null)} aria-label="Dismiss" className="text-slate-400 hover:text-slate-600"><Icon name="close" className="w-4 h-4" /></button>
+          </div>
+          <ul className="text-xs text-slate-600 space-y-1 pl-7 list-disc">
+            <li>{signup.webhookSubscribed ? "Incoming messages are linked automatically." : "Webhook subscription could not be confirmed. Use Refresh, or contact support if messages don't arrive."}</li>
+            {signup.registered && signup.pin && (
+              <li>Two-step verification PIN for this number: <b className="font-mono text-sm text-slate-900">{signup.pin}</b>. Save it now; it is shown only once.</li>
+            )}
+            {!signup.registered && <li>The number was already registered on WhatsApp Cloud API, so its existing PIN was kept. ({signup.registerError})</li>}
+            <li>Add a payment method in Meta Business Suite → WhatsApp Manager to send template messages.</li>
+          </ul>
+        </div>
+      )}
 
       {showForm && (
         <form onSubmit={connect} className="rounded-2xl border border-green-200 bg-green-50/40 p-4 sm:p-5 space-y-4">
@@ -195,8 +231,13 @@ export function WhatsAppSettings({ isAdmin }: { isAdmin: boolean }) {
                     </div>
                   </div>
                 </div>
+                <div className="flex flex-wrap gap-2 sm:shrink-0">
+                    <button onClick={() => setProfileFor(profileFor === acc.id ? null : acc.id)}
+                      className={cn("inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium", profileFor === acc.id ? "border-green-200 bg-green-50 text-green-700" : "border-slate-200 text-slate-600 hover:bg-slate-50")}>
+                      <Icon name="storefront" className="w-3.5 h-3.5" /> Business profile
+                    </button>
                 {isAdmin && (
-                  <div className="flex flex-wrap gap-2 sm:shrink-0">
+                  <>
                     <button disabled={busyId === acc.id} onClick={() => { setTokenFor(tokenFor === acc.id ? null : acc.id); setNewToken(""); }}
                       className={cn("inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium disabled:opacity-50",
                         healthById.get(acc.id)?.status === "expired_or_invalid" || healthById.get(acc.id)?.status === "expiring"
@@ -215,9 +256,11 @@ export function WhatsAppSettings({ isAdmin }: { isAdmin: boolean }) {
                       className="rounded-lg border border-red-100 px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 disabled:opacity-50">
                       Remove
                     </button>
-                  </div>
+                  </>
                 )}
                 </div>
+                </div>
+                {profileFor === acc.id && <BusinessProfilePanel accountId={acc.id} isAdmin={isAdmin} />}
                 {isAdmin && tokenFor === acc.id && (
                   <form onSubmit={(e) => updateToken(e, acc)} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4 space-y-3">
                     <label className="space-y-1.5 block"><span className="text-xs font-semibold text-slate-600">New access token</span>
@@ -241,7 +284,7 @@ export function WhatsAppSettings({ isAdmin }: { isAdmin: boolean }) {
         )}
       </div>
 
-      {data?.webhook && (
+      {data?.webhook && (!data.embeddedSignup || showForm) && (
         <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 space-y-4">
           <div>
             <h3 className="text-sm font-bold text-slate-900">Webhook configuration</h3>

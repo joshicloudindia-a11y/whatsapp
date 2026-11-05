@@ -440,3 +440,109 @@ export async function downloadMedia(mediaId: string, accessToken: string, phoneN
   const blob = await res.blob();
   return { blob, mimeType: lookup.info.mime_type ?? blob.type ?? "application/octet-stream" };
 }
+
+// ─── Embedded Signup (Tech Provider onboarding) ──────────────────────────────
+
+export const GRAPH_VERSION = META_GRAPH_API_VERSION;
+
+async function graphGet<T = Record<string, unknown>>(path: string, accessToken?: string): Promise<T> {
+  const res = await fetch(`${META_API_BASE}/${path}`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(metaErrorMessage(data, "Meta API error"));
+  return data as T;
+}
+
+async function graphPost<T = Record<string, unknown>>(path: string, accessToken: string, body: object): Promise<T> {
+  const res = await fetch(`${META_API_BASE}/${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(metaErrorMessage(data, "Meta API error"));
+  return data as T;
+}
+
+/** Server-to-server: exchanges the 30-second Embedded Signup code for the customer's business token. */
+export async function exchangeEmbeddedSignupCode(code: string): Promise<string> {
+  const appId = process.env.META_APP_ID, secret = process.env.META_APP_SECRET;
+  if (!appId || !secret) throw new Error("META_APP_ID / META_APP_SECRET are not configured");
+  const q = new URLSearchParams({ client_id: appId, client_secret: secret, code });
+  const data = await graphGet<{ access_token?: string }>(`oauth/access_token?${q}`);
+  if (!data.access_token) throw new Error("Meta did not return an access token");
+  return data.access_token;
+}
+
+/** WABA ids the business token was granted (fallback when the signup session info didn't arrive). */
+export async function grantedWabaIds(accessToken: string): Promise<string[]> {
+  const appToken = `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`;
+  const q = new URLSearchParams({ input_token: accessToken, access_token: appToken });
+  const data = await graphGet<{ data?: { granular_scopes?: { scope: string; target_ids?: string[] }[] } }>(`debug_token?${q}`);
+  const scope = data.data?.granular_scopes?.find((s) => s.scope === "whatsapp_business_management");
+  return scope?.target_ids ?? [];
+}
+
+export interface WabaPhoneNumber extends PhoneNumberInfo { id: string }
+
+export async function listWabaPhoneNumbers(wabaId: string, accessToken: string): Promise<WabaPhoneNumber[]> {
+  const data = await graphGet<{ data?: WabaPhoneNumber[] }>(
+    `${encodeURIComponent(wabaId)}/phone_numbers?fields=id,display_phone_number,verified_name,quality_rating,messaging_limit_tier`,
+    accessToken,
+  );
+  return data.data ?? [];
+}
+
+/** Registers the number on Cloud API; `pin` becomes its two-step verification PIN. */
+export async function registerPhoneNumber(phoneNumberId: string, accessToken: string, pin: string) {
+  return graphPost(`${encodeURIComponent(phoneNumberId)}/register`, accessToken, { messaging_product: "whatsapp", pin });
+}
+
+// ─── Business profile (WhatsApp Business Management API) ─────────────────────
+
+export const BUSINESS_VERTICALS = [
+  "UNDEFINED", "OTHER", "AUTO", "BEAUTY", "APPAREL", "EDU", "ENTERTAIN", "EVENT_PLAN", "FINANCE", "GROCERY", "GOVT",
+  "HOTEL", "HEALTH", "NONPROFIT", "PROF_SERVICES", "RETAIL", "TRAVEL", "RESTAURANT",
+] as const;
+
+export interface BusinessProfile {
+  about?: string; address?: string; description?: string; email?: string;
+  websites?: string[]; vertical?: string; profile_picture_url?: string;
+}
+
+export async function getBusinessProfile(phoneNumberId: string, accessToken: string): Promise<BusinessProfile> {
+  const data = await graphGet<{ data?: BusinessProfile[] }>(
+    `${encodeURIComponent(phoneNumberId)}/whatsapp_business_profile?fields=about,address,description,email,profile_picture_url,websites,vertical`,
+    accessToken,
+  );
+  return data.data?.[0] ?? {};
+}
+
+export async function updateBusinessProfile(phoneNumberId: string, accessToken: string, profile: Omit<BusinessProfile, "profile_picture_url">) {
+  return graphPost(`${encodeURIComponent(phoneNumberId)}/whatsapp_business_profile`, accessToken, { messaging_product: "whatsapp", ...profile });
+}
+
+// ─── Marketing Messages API for WhatsApp ─────────────────────────────────────
+
+/** "ONBOARDED" | "ELIGIBLE" | other/unknown. Only ONBOARDED WABAs may use /marketing_messages. */
+export async function getMarketingMessagesStatus(wabaId: string, accessToken: string): Promise<string> {
+  const data = await graphGet<{ marketing_messages_onboarding_status?: string | { status?: string } }>(
+    `${encodeURIComponent(wabaId)}?fields=marketing_messages_onboarding_status`,
+    accessToken,
+  );
+  const s = data.marketing_messages_onboarding_status;
+  return (typeof s === "string" ? s : s?.status) ?? "UNKNOWN";
+}
+
+/** Sends a marketing template through the Marketing Messages API (optimized delivery). */
+export async function sendMarketingTemplateMessage({ to, templateName, languageCode, components = [], accessToken, phoneNumberId }: SendTemplatePayload) {
+  return graphPost<{ messages?: { id: string }[] }>(`${encodeURIComponent(phoneNumberId)}/marketing_messages`, accessToken, {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to,
+    type: "template",
+    template: { name: templateName, language: { code: languageCode }, components },
+  });
+}

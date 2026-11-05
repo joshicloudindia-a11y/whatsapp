@@ -1,6 +1,6 @@
 import type { MessageStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { sendTemplateMessage } from "@/lib/whatsapp";
+import { getMarketingMessagesStatus, sendMarketingTemplateMessage, sendTemplateMessage } from "@/lib/whatsapp";
 import { pusherServer, PUSHER_EVENTS, orgChannel } from "@/lib/pusher";
 import { resolvePlanConfig } from "@/lib/plans";
 
@@ -70,6 +70,11 @@ export async function runBroadcast(broadcastId: string, budgetMs = 240_000): Pro
 
   const placeholders = placeholdersOf(b.template.body);
 
+  // Marketing templates go through the Marketing Messages API when the WABA is onboarded to it
+  // (optimized delivery); otherwise, or if Meta rejects it, through the regular Cloud API.
+  let useMarketingApi = b.template.category === "MARKETING"
+    && (await getMarketingMessagesStatus(b.whatsappAccount.wabaId, b.whatsappAccount.accessToken).catch(() => "UNKNOWN")) === "ONBOARDED";
+
   while (Date.now() - started < budgetMs) {
     // Respect pause/cancel requested from the UI.
     const current = await prisma.broadcast.findUnique({ where: { id: b.id }, select: { status: true } });
@@ -91,15 +96,24 @@ export async function runBroadcast(broadcastId: string, budgetMs = 240_000): Pro
         }
         const vars = Array.isArray(r.variables) ? (r.variables as string[]) : [];
         try {
-          const res = await sendTemplateMessage({
+          const payload = {
             to: r.contact.phone,
             templateName: b.template!.name,
             languageCode: b.template!.language,
             components: placeholders.length ? [{ type: "body", parameters: placeholders.map((_, k) => ({ type: "text", text: vars[k] ?? "" })) }] : [],
             accessToken: b.whatsappAccount.accessToken,
             phoneNumberId: b.whatsappAccount.phoneNumberId,
-          });
-          await prisma.broadcastRecipient.update({ where: { id: r.id }, data: { status: "SENT", wamid: res.messages?.[0]?.id ?? null, sentAt: new Date() } });
+          };
+          let res: { messages?: { id: string }[] } | undefined;
+          if (useMarketingApi) {
+            try { res = await sendMarketingTemplateMessage(payload); }
+            catch (e) {
+              console.warn("[broadcast] Marketing Messages API failed, using Cloud API", (e as Error).message);
+              useMarketingApi = false;
+            }
+          }
+          const sent = res ?? (await sendTemplateMessage(payload));
+          await prisma.broadcastRecipient.update({ where: { id: r.id }, data: { status: "SENT", wamid: sent.messages?.[0]?.id ?? null, sentAt: new Date() } });
           await prisma.broadcast.update({ where: { id: b.id }, data: { sentCount: { increment: 1 } } });
         } catch (e) {
           await prisma.broadcastRecipient.update({ where: { id: r.id }, data: { status: "FAILED", failReason: String((e as Error).message ?? "Send failed").slice(0, 300) } });
