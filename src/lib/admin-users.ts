@@ -19,7 +19,9 @@ export const USER_SELECT = {
   lastLoginIp: true,
   createdAt: true,
   memberships: {
+    where: { isActive: true },
     include: { organization: { select: { id: true, name: true, slug: true, plan: true } } },
+    orderBy: { createdAt: "asc" },
     take: 1,
   },
 } satisfies Prisma.UserSelect;

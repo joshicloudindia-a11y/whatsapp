@@ -55,7 +55,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const changes: Record<string, unknown> = {};
   let revokeSessions = false;
 
-  if (body.name !== undefined || body.email !== undefined || body.memberRole !== undefined) {
+  if (body.name !== undefined || body.email !== undefined) {
     const d = need("users:write"); if (d) return d;
   }
   if (body.name !== undefined) {
@@ -118,22 +118,48 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
   if (revokeSessions) data.sessionsRevokedAt = new Date();
 
-  let memberRoleChange: { organizationId: string; role: MemberRoleName } | null = null;
-  if (body.memberRole !== undefined && body.organizationId) {
-    if (!MEMBER_ROLES.includes(body.memberRole)) return deny("Invalid organization role", 400);
-    memberRoleChange = { organizationId: String(body.organizationId), role: body.memberRole };
-    changes.memberRole = memberRoleChange;
+  // Organization membership: add to / move between / remove from an organization.
+  // `organizationId: null` removes the user from their organization. A user has one active organization.
+  let orgChange: { organizationId: string | null; role: MemberRoleName } | null = null;
+  if (body.organizationId !== undefined || body.memberRole !== undefined) {
+    const d = need("users:write"); if (d) return d;
+    const role = (body.memberRole ?? "AGENT") as MemberRoleName;
+    if (!MEMBER_ROLES.includes(role)) return deny("Invalid organization role", 400);
+    const organizationId = body.organizationId ? String(body.organizationId) : null;
+    if (organizationId) {
+      const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { id: true } });
+      if (!org) return deny("Organization not found", 404);
+    }
+    // Never leave an organization without an admin.
+    const current = await prisma.organizationMember.findMany({ where: { userId: id, isActive: true }, select: { organizationId: true, role: true } });
+    for (const m of current) {
+      const leavingAdmin = m.role === "ADMIN" && (m.organizationId !== organizationId || role !== "ADMIN");
+      if (leavingAdmin) {
+        const admins = await prisma.organizationMember.count({ where: { organizationId: m.organizationId, isActive: true, role: "ADMIN" } });
+        if (admins <= 1) return deny("This user is the only admin of their organization. Make someone else admin first.", 400);
+      }
+    }
+    orgChange = { organizationId, role };
+    changes.organization = orgChange;
   }
 
   if (Object.keys(changes).length === 0) return deny("Nothing to update", 400);
 
   try {
     const user = await prisma.$transaction(async (tx) => {
-      if (memberRoleChange) {
+      if (orgChange) {
+        // Deactivate memberships in other organizations (one active organization per user).
         await tx.organizationMember.updateMany({
-          where: { userId: id, organizationId: memberRoleChange.organizationId },
-          data: { role: memberRoleChange.role },
+          where: { userId: id, isActive: true, ...(orgChange.organizationId && { organizationId: { not: orgChange.organizationId } }) },
+          data: { isActive: false },
         });
+        if (orgChange.organizationId) {
+          await tx.organizationMember.upsert({
+            where: { organizationId_userId: { organizationId: orgChange.organizationId, userId: id } },
+            update: { isActive: true, role: orgChange.role },
+            create: { organizationId: orgChange.organizationId, userId: id, role: orgChange.role, joinedAt: new Date() },
+          });
+        }
       }
       return tx.user.update({ where: { id }, data, select: USER_SELECT });
     });

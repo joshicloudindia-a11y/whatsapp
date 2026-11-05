@@ -394,6 +394,11 @@ function EditUserModal({
   const [name, setName] = useState(user.name ?? "");
   const [email, setEmail] = useState(user.email);
   const [memberRole, setMemberRole] = useState(membership?.role ?? "AGENT");
+  const [orgId, setOrgId] = useState(membership?.organization.id ?? "");
+  const { data: orgs } = useQuery({
+    queryKey: ["admin-org-options"],
+    queryFn: () => axios.get("/api/admin/organizations", { params: { limit: 100 } }).then((r) => r.data.organizations as { id: string; name: string }[]),
+  });
   const [adminRole, setAdminRole] = useState<string>(initialRole);
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
@@ -403,7 +408,10 @@ function EditUserModal({
     const body: Record<string, unknown> = {};
     if (name !== (user.name ?? "")) body.name = name;
     if (email !== user.email) body.email = email;
-    if (membership && memberRole !== membership.role) { body.memberRole = memberRole; body.organizationId = membership.organization.id; }
+    if (orgId !== (membership?.organization.id ?? "") || (orgId && memberRole !== membership?.role)) {
+      body.organizationId = orgId || null;
+      body.memberRole = memberRole;
+    }
     if (canAssignAdmin && !isSelf && adminRole !== initialRole) body.adminRoleId = adminRole || null;
     if (canResetPassword && password) body.password = password;
     if (Object.keys(body).length === 0) { onClose(); return; }
@@ -437,13 +445,22 @@ function EditUserModal({
           <Field label="Email"><input type="email" className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
         </div>
 
-        {membership && (
-          <Field label={`Role in ${membership.organization.name}`}>
-            <select className={inputCls} value={memberRole} onChange={(e) => setMemberRole(e.target.value)}>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Organization" hint={membership ? (orgId === membership.organization.id ? "Current organization." : orgId ? "User will be moved to this organization." : "User will be removed from their organization.") : "Add this user to an organization."}>
+            <select className={inputCls} value={orgId} onChange={(e) => setOrgId(e.target.value)}>
+              <option value="">— No organization —</option>
+              {membership && !orgs?.some((o) => o.id === membership.organization.id) && (
+                <option value={membership.organization.id}>{membership.organization.name}</option>
+              )}
+              {orgs?.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Organization role" hint="Takes effect the next time they sign in.">
+            <select className={inputCls} value={memberRole} onChange={(e) => setMemberRole(e.target.value)} disabled={!orgId}>
               {MEMBER_ROLES.map((r) => <option key={r} value={r}>{r.replace(/_/g, " ")}</option>)}
             </select>
           </Field>
-        )}
+        </div>
 
         {canAssignAdmin && (
           <Field label="Super admin panel access" hint={isSelf ? "You cannot change your own admin role." : "Changing the role signs the user out of the admin panel."}>
