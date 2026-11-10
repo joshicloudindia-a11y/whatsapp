@@ -9,6 +9,7 @@ import { Icon } from "@/components/ui/icon";
 import { useCheckout } from "@/components/billing/use-checkout";
 import { cn } from "@/lib/utils";
 import { Meter, SButton, SettingsCard, SettingsHeader } from "./ui";
+import { LEGAL } from "@/lib/legal";
 
 interface Usage { key: string; label: string; used: number; limit: number; icon: string }
 interface Sub {
@@ -186,7 +187,7 @@ export function SubscriptionSettings() {
                         )}
                       </>
                     ) : (
-                      <a href="mailto:support@chatflow.ai?subject=Plan%20upgrade" className="block text-center rounded-xl border border-slate-200 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">Contact sales</a>
+                      <a href={`mailto:${LEGAL.email}?subject=Plan%20upgrade`} className="block text-center rounded-xl border border-slate-200 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">Contact sales</a>
                     )}
                   </div>
                 </div>

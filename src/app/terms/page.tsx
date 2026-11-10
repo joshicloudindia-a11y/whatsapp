@@ -95,7 +95,7 @@ const sections: LegalSection[] = [
           "If a payment fails, we may retry it, and we may limit or suspend paid features until the payment succeeds.",
           "We may change our prices. Changes apply from your next billing period, and we will notify you before they take effect.",
         ]} />
-        <P>Cancellations and refunds are covered by our <DocLink slug="refund-policy">Refund &amp; Cancellation Policy</DocLink>.</P>
+        <P>All payments are non-refundable, except for duplicate or failed payments. See our <DocLink slug="refund-policy">Refund &amp; Cancellation Policy</DocLink>.</P>
       </>
     ),
   },

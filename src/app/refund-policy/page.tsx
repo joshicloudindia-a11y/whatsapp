@@ -45,22 +45,37 @@ const sections: LegalSection[] = [
     ),
   },
   {
-    id: "eligibility",
-    title: "Refund eligibility",
+    id: "no-refunds",
+    title: "No refunds",
     body: (
       <>
-        <P>We issue a full refund when:</P>
-        <UL items={[
-          <><B>First purchase:</B> you ask within 7 days of your first payment for a paid plan, and you have not used it substantially (for example, you have not sent a broadcast to more than 1,000 recipients).</>,
-          <><B>Duplicate or wrong charge:</B> you were charged twice, or charged an amount different from what you approved.</>,
-          <><B>Service failure:</B> your plan could not be activated, or the Service was unavailable for most of the billing period because of a fault on our side.</>,
-        ]} />
-        <P>Otherwise, payments are not refundable. This includes renewals, unused time after a mid-period cancellation, and downgrades.</P>
+        <Callout tone="amber" icon="block">
+          <B>All payments to {LEGAL.brand} are final and non-refundable.</B> This includes first purchases, renewals, upgrades,
+          unused time after cancellation, downgrades, and partially used billing periods.
+        </Callout>
+        <P>
+          Before you buy, please use the free plan or trial (where available) to check that {LEGAL.brand}{" "}meets your needs. If you
+          don&apos;t want to continue, cancel before your next renewal date, and you won&apos;t be charged again.
+        </P>
         <P>
           Decisions made by Meta, such as rejecting a message template, a display name or a WhatsApp Business Account, limiting messaging,
-          or restricting a phone number, are outside our control. On their own, they are not grounds for a refund, except within the 7-day
-          first-purchase window above.
+          or restricting a phone number, are outside our control and are not grounds for a refund.
         </P>
+      </>
+    ),
+  },
+  {
+    id: "payment-errors",
+    title: "Duplicate or failed payments",
+    body: (
+      <>
+        <P>A payment error is not a refund. If one of these happens, we return the extra amount in full:</P>
+        <UL items={[
+          <><B>Duplicate charge:</B> you were charged more than once for the same plan and period.</>,
+          <><B>Failed activation:</B> money was debited, but your plan was not activated within 24 hours.</>,
+          <><B>Wrong amount:</B> you were charged a different amount from the one shown at checkout.</>,
+        ]} />
+        <P>Failed transactions are often reversed automatically by your bank or by our payment partner (Razorpay), as RBI timelines require.</P>
       </>
     ),
   },
@@ -78,13 +93,13 @@ const sections: LegalSection[] = [
   },
   {
     id: "how-to",
-    title: "How to request a refund",
+    title: "Reporting a payment error",
     body: (
       <UL items={[
-        <>Email <Mail /> from the email address of your account, with the subject &ldquo;Refund request&rdquo;.</>,
+        <>Email <Mail /> from the email address of your account, with the subject &ldquo;Payment issue&rdquo;.</>,
         "Include your organization name, the payment date and amount, and the payment or invoice ID.",
-        "We confirm receipt within 2 business days and tell you our decision within 7 business days.",
-        "Approved refunds go back to the original payment method through our payment partner (Razorpay). They usually reach your account within 5 to 7 business days, depending on your bank.",
+        "We confirm receipt within 2 business days and resolve verified payment errors within 7 business days.",
+        "Amounts we return go back to the original payment method through our payment partner (Razorpay). They usually reach your account within 5 to 7 business days, depending on your bank.",
         "Please contact us before raising a chargeback or payment dispute with your bank. We can usually resolve the issue faster.",
       ]} />
     ),
@@ -112,8 +127,8 @@ export default async function RefundPolicyPage() {
       sections={sections}
       intro={
         <P>
-          We want you to be happy with {LEGAL.brand}. This policy explains how plans are delivered, how to cancel, and when you can get a
-          refund.
+          This policy explains how {LEGAL.brand} plans are delivered and billed, how to cancel, and what happens if there is a payment
+          error. Please read it before you buy. All payments are non-refundable.
         </P>
       }
     />
