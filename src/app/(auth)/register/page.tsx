@@ -78,7 +78,10 @@ function RegisterForm({
       </form>
 
       <p className="text-center text-xs text-slate-400">
-        By signing up you agree to our Terms of Service and Privacy Policy.
+        By signing up you agree to our{" "}
+        <Link href="/terms" target="_blank" className="text-slate-500 underline underline-offset-2 hover:text-green-600">Terms of Service</Link>,{" "}
+        <Link href="/acceptable-use" target="_blank" className="text-slate-500 underline underline-offset-2 hover:text-green-600">Acceptable Use Policy</Link> and{" "}
+        <Link href="/privacy" target="_blank" className="text-slate-500 underline underline-offset-2 hover:text-green-600">Privacy Policy</Link>.
       </p>
       <p className="text-center text-sm text-slate-500">
         Already have an account?{" "}
@@ -222,7 +225,7 @@ function OtpStep({ email, name }: { email: string; name: string }) {
 
       {/* Resend */}
       <div className="text-sm text-slate-500">
-        Didn't receive it?{" "}
+        Didn&apos;t receive it?{" "}
         {countdown > 0 ? (
           <span className="text-slate-400">Resend in {countdown}s</span>
         ) : (

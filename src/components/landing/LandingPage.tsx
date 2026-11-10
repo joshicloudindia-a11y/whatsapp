@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { Eyebrow, FOCUS, Logo } from "./brand";
 import { HeroMockup } from "./HeroMockup";
 import { Pricing } from "./Pricing";
+import { LEGAL_DOCS } from "@/lib/legal";
 
 // ─── Content ──────────────────────────────────────────────────────────────────
 const NAV_LINKS = [
@@ -591,7 +592,7 @@ function Footer({ year, isLoggedIn, dashHref, dashLabel }: NavProps & { year: nu
     : [["Login", "/login"], ["Create account", "/register"], ["Forgot password", "/forgot-password"]];
   return (
     <footer className="bg-slate-950 text-slate-300">
-      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-14 sm:grid-cols-2 sm:px-6 lg:grid-cols-[2fr_1fr_1fr_1fr] lg:px-8">
+      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-14 sm:grid-cols-2 sm:px-6 lg:grid-cols-[2fr_1fr_1fr_1fr_1fr] lg:px-8">
         <div>
           <Logo />
           <p className="mt-4 max-w-xs text-sm leading-relaxed text-slate-400">
@@ -619,6 +620,14 @@ function Footer({ year, isLoggedIn, dashHref, dashLabel }: NavProps & { year: nu
           <ul className="mt-4 space-y-2.5 text-sm">
             {account.map(([l, h]) => (
               <li key={h}><Link href={h} className={cn("rounded hover:text-white", FOCUS, "focus-visible:ring-offset-slate-950")}>{l}</Link></li>
+            ))}
+          </ul>
+        </nav>
+        <nav aria-label="Legal">
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Legal</p>
+          <ul className="mt-4 space-y-2.5 text-sm">
+            {LEGAL_DOCS.map((d) => (
+              <li key={d.slug}><Link href={`/${d.slug}`} className={cn("rounded hover:text-white", FOCUS, "focus-visible:ring-offset-slate-950")}>{d.title}</Link></li>
             ))}
           </ul>
         </nav>
