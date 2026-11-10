@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { toast } from "sonner";
 import { useAdmin } from "@/components/admin/admin-context";
+import { startImpersonation } from "@/components/admin/impersonation-client";
 import {
   Page, PageHeader, Card, Button, IconButton, Badge, RoleBadge, Avatar, Field, inputCls, SearchInput,
   FilterTabs, EmptyState, SkeletonRows, Pagination, Modal, ConfirmDialog, apiError, useDebounced, cx,
@@ -111,6 +112,9 @@ export default function AdminUsersPage() {
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [deleting, setDeleting] = useState<UserRow | null>(null);
   const [busy, setBusy] = useState(false);
+  const [impersonating, setImpersonating] = useState<UserRow | null>(null);
+  const [staffLink, setStaffLink] = useState<{ user: UserRow; url: string; expiresAt: number } | null>(null);
+  const isSuperAdmin = me.role.key === "SUPER_ADMIN";
 
   const { data, isLoading } = useQuery({
     queryKey: ["admin-users", debounced, filter, page, roleId],
@@ -153,6 +157,24 @@ export default function AdminUsersPage() {
     finally { setBusy(false); }
   };
 
+  const doImpersonate = async () => {
+    if (!impersonating) return;
+    setBusy(true);
+    try {
+      await startImpersonation(impersonating.id);
+    } catch (e) {
+      toast.error(apiError(e));
+      setBusy(false);
+    }
+  };
+
+  const createStaffLink = async (u: UserRow) => {
+    try {
+      const { data } = await axios.post(`/api/admin/users/${u.id}/login-link`);
+      setStaffLink({ user: u, url: data.url, expiresAt: data.expiresAt });
+    } catch (e) { toast.error(apiError(e)); }
+  };
+
   const isLocked = (u: UserRow) => !!u.lockedUntil && new Date(u.lockedUntil) > new Date();
 
   const StatusBadge = ({ u }: { u: UserRow }) =>
@@ -165,6 +187,12 @@ export default function AdminUsersPage() {
     const self = u.id === me.id;
     return (
       <div className="flex items-center gap-1.5">
+        {isSuperAdmin && !self && u.isActive && u.adminRoleInfo?.key !== "SUPER_ADMIN" && (
+          <IconButton icon={"login"} label="Login as this user" tone="success" onClick={() => setImpersonating(u)} />
+        )}
+        {isSuperAdmin && u.isActive && u.adminRoleInfo && u.adminRoleInfo.key !== "SUPER_ADMIN" && (
+          <IconButton icon={"link"} label="Personal admin sign-in link" onClick={() => createStaffLink(u)} />
+        )}
         {(can("users:write") || can("admins:manage") || can("users:password") || can("users:sessions")) && <IconButton icon={"edit"} label="Edit user" disabled={!manageable} onClick={() => setEditing(u)} />}
         {can("users:sessions") && isLocked(u) && (
           <IconButton icon={"lock_open"} label="Unlock account" tone="success" disabled={!manageable} onClick={() => patch(u, { unlock: true }, "Account unlocked")} />
@@ -302,6 +330,41 @@ export default function AdminUsersPage() {
           canResetPassword={can("users:password")}
         />
       )}
+
+      <ConfirmDialog
+        open={!!impersonating}
+        onClose={() => { if (!busy) setImpersonating(null); }}
+        onConfirm={doImpersonate}
+        loading={busy}
+        danger={false}
+        title={`Sign in as ${impersonating?.name || impersonating?.email}?`}
+        confirmLabel="Login as user"
+        message={
+          <>
+            You&apos;ll see the app exactly as <b>{impersonating?.email}</b> does, for up to 1 hour. Admin powers are not carried over,
+            and profile or password changes are blocked. This is recorded in the audit log. Use <b>Exit to admin</b> in the yellow bar to come back.
+          </>
+        }
+      />
+
+      <Modal open={!!staffLink} onClose={() => setStaffLink(null)} title="Personal sign-in link" description={staffLink?.user.email} icon={"link"}>
+        {staffLink && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Send this private link to <b>{staffLink.user.name || staffLink.user.email}</b>. Admin staff can only sign in to the admin panel through
+              their personal link, and they still need their password and the email code.
+            </p>
+            <div className="flex gap-2">
+              <input readOnly value={staffLink.url} onFocus={(e) => e.currentTarget.select()} className={cx(inputCls, "font-mono text-xs")} />
+              <Button type="button" icon={"content_copy"} onClick={() => { navigator.clipboard.writeText(staffLink.url); toast.success("Link copied"); }}>Copy</Button>
+            </div>
+            <ul className="space-y-1.5 text-xs text-slate-500">
+              <li className="flex gap-1.5"><Icon name="schedule" className="w-3.5 h-3.5 mt-0.5 shrink-0" /> Valid until {new Date(staffLink.expiresAt).toLocaleDateString()}.</li>
+              <li className="flex gap-1.5"><Icon name="lock" className="w-3.5 h-3.5 mt-0.5 shrink-0" /> To cancel every link already sent, use <b>Edit user → Revoke sessions</b>.</li>
+            </ul>
+          </div>
+        )}
+      </Modal>
 
       <ConfirmDialog
         open={!!deleting}

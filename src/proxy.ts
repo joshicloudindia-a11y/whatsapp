@@ -52,6 +52,18 @@ export async function proxy(req: NextRequest) {
     return withAdminHeaders(NextResponse.redirect(loginUrl));
   }
 
+  // "Login as user" (Super Admin impersonation): hard time limit and no account-credential changes.
+  const imp = token?.impersonator;
+  if (imp) {
+    if (Date.now() > imp.expiresAt && pathname !== "/impersonation-ended") {
+      if (pathname.startsWith("/api/")) return NextResponse.json({ error: "Login-as session ended" }, { status: 401 });
+      return NextResponse.redirect(new URL("/impersonation-ended", req.url));
+    }
+    if (pathname.startsWith("/api/profile") && req.method !== "GET") {
+      return NextResponse.json({ error: "Profile and password changes are disabled while a Super Admin is signed in as this user" }, { status: 403 });
+    }
+  }
+
   if (!token) {
     const loginUrl = new URL("/login", req.url);
     loginUrl.searchParams.set("callbackUrl", req.url);

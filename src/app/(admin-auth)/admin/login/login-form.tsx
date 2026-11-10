@@ -19,6 +19,17 @@ const inputCls =
   "w-full rounded-xl border border-white/10 bg-white/5 pl-11 pr-4 py-3 text-sm text-white placeholder:text-slate-500 " +
   "focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500/60";
 
+/** "Mr. Harsh Parmal" → "Harsh" (skips honorifics). */
+function firstName(name: string | null) {
+  const parts = (name ?? "").trim().split(/\s+/).filter((w) => !/^(mr|mrs|ms|miss|dr|shri|smt|sri)\.?$/i.test(w));
+  return parts[0] || "there";
+}
+
+function initials(name: string | null, email: string) {
+  const parts = (name ?? "").trim().split(/\s+/).filter((w) => w && !/^(mr|mrs|ms|miss|dr|shri|smt|sri)\.?$/i.test(w));
+  return (parts.length ? parts.slice(0, 2).map((w) => w[0]).join("") : email[0]).toUpperCase();
+}
+
 function apiError(e: unknown) {
   return (e as { response?: { data?: { error?: string } } })?.response?.data?.error ?? "Something went wrong. Try again.";
 }
@@ -28,6 +39,7 @@ export default function AdminLoginForm() {
   const rawCallback = params.get("callbackUrl") ?? "/admin";
   const callbackUrl = rawCallback.startsWith("/admin") && !rawCallback.startsWith("//") ? rawCallback : "/admin";
   const reason = params.get("reason");
+  const staffKey = params.get("k");
 
   const [step, setStep] = useState<"credentials" | "otp">("credentials");
   const [email, setEmail] = useState("");
@@ -41,6 +53,17 @@ export default function AdminLoginForm() {
   const [expiresAt, setExpiresAt] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const boxes = useRef<(HTMLInputElement | null)[]>([]);
+  // Personal sign-in link for admin staff (?k=…): greet them and lock in their email.
+  const [staff, setStaff] = useState<{ name: string | null; email: string; role: { name: string; color: string } } | null>(null);
+
+  useEffect(() => {
+    if (!staffKey) return;
+    let alive = true;
+    axios.get("/api/admin-auth/personal", { params: { k: staffKey } })
+      .then(({ data }) => { if (alive) { setStaff(data); setEmail(data.email); } })
+      .catch((e) => { if (alive) setError(apiError(e)); });
+    return () => { alive = false; };
+  }, [staffKey]);
 
   useEffect(() => {
     if (step !== "otp") return;
@@ -54,7 +77,7 @@ export default function AdminLoginForm() {
     setError(null);
     setLoading(true);
     try {
-      const { data } = await axios.post("/api/admin-auth/login", { email, password });
+      const { data } = await axios.post("/api/admin-auth/login", { email, password, ...(staffKey && { k: staffKey }) });
       setChallenge(data.challenge);
       setMaskedEmail(data.email);
       setExpiresAt(Date.now() + data.expiresInSeconds * 1000);
@@ -168,10 +191,25 @@ export default function AdminLoginForm() {
 
           {step === "credentials" ? (
             <form onSubmit={requestCode} className="space-y-5">
-              <div>
-                <h1 className="text-2xl font-bold">Admin sign in</h1>
-                <p className="text-sm text-slate-400 mt-1">Step 1 of 2 · Enter your admin credentials</p>
-              </div>
+              {staff ? (
+                <div className="flex items-center gap-3">
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-base font-bold text-white" style={{ background: staff.role.color }}>
+                    {initials(staff.name, staff.email)}
+                  </span>
+                  <div className="min-w-0">
+                    <h1 className="text-2xl font-bold truncate">Welcome back, {firstName(staff.name)}</h1>
+                    <p className="text-sm text-slate-400 mt-0.5 flex flex-wrap items-center gap-1.5">
+                      <span className="rounded-full px-2 py-0.5 text-[10px] font-bold text-white" style={{ background: staff.role.color }}>{staff.role.name}</span>
+                      Step 1 of 2 · Enter your password
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <h1 className="text-2xl font-bold">Admin sign in</h1>
+                  <p className="text-sm text-slate-400 mt-1">Step 1 of 2 · Enter your admin credentials</p>
+                </div>
+              )}
 
               {error && <ErrorBox message={error} />}
 
@@ -179,8 +217,8 @@ export default function AdminLoginForm() {
                 <span className="text-xs font-semibold text-slate-300">Work email</span>
                 <div className="relative">
                 <Icon name="mail" className="absolute left-4 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
-                <input type="email" className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)}
-                  required autoComplete="username" autoFocus placeholder="you@company.com" />
+                <input type="email" className={`${inputCls} ${staff ? "opacity-70 cursor-not-allowed" : ""}`} value={email} onChange={(e) => setEmail(e.target.value)}
+                  readOnly={!!staff} required autoComplete="username" autoFocus={!staffKey} placeholder="you@company.com" />
                 </div>
               </label>
               <label className="block space-y-1.5">
@@ -188,7 +226,7 @@ export default function AdminLoginForm() {
                 <div className="relative">
                   <Icon name="lock" className="absolute left-4 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
                   <input type={showPw ? "text" : "password"} className={`${inputCls} pr-11`} value={password}
-                    onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" placeholder="••••••••••" />
+                    onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" autoFocus={!!staffKey} placeholder="••••••••••" />
                   <button type="button" onClick={() => setShowPw(!showPw)} aria-label={showPw ? "Hide password" : "Show password"}
                     className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
                     <Icon name={showPw ? "visibility_off" : "visibility"} className="w-4 h-4" />

@@ -11,6 +11,7 @@ import {
   safeEqualHex,
   secretHash,
 } from "@/lib/admin-auth";
+import { IMPERSONATION_MAX_MS, activeSuperAdmin, verifyToken } from "@/lib/impersonation";
 
 type HeaderBag = Record<string, string | string[] | undefined> | undefined;
 
@@ -155,6 +156,76 @@ export const authOptions: NextAuthOptions = {
         };
       },
     }),
+
+    // ── "Login as user": Super Admin enters a user's account (ticket from /api/admin/users/[id]/impersonate) ──
+    CredentialsProvider({
+      id: "impersonate",
+      name: "impersonate",
+      credentials: { ticket: { label: "Ticket", type: "text" } },
+      async authorize(credentials, req) {
+        const t = verifyToken<{ a: string; t: string; aa: number }>("imp", credentials?.ticket);
+        if (!t) return null;
+        const admin = await activeSuperAdmin(t.a, t.aa);
+        if (!admin) return null;
+        const user = await prisma.user.findUnique({
+          where: { id: t.t },
+          include: { ...userInclude, adminRoleDef: { select: ROLE_SELECT } },
+        });
+        if (!user || !user.isActive || user.id === admin.id) return null;
+        if ((await resolveAdminRole(user))?.key === "SUPER_ADMIN") return null;
+
+        const now = Date.now();
+        await audit(null, "user.impersonate.start", {
+          ip: ipFromReq(req as { headers?: HeaderBag }), userAgent: uaFromReq(req as { headers?: HeaderBag }),
+          actorId: admin.id, actorEmail: admin.email, entity: "User", entityId: user.id, metadata: { target: user.email },
+        });
+        const membership = user.memberships[0];
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          image: user.avatar,
+          isSuperAdmin: false, // never carries admin powers into the user's session
+          organizationId: membership?.organizationId ?? null,
+          organizationSlug: membership?.organization?.slug ?? null,
+          role: membership?.role ?? null,
+          adminRole: null,
+          adminAuthAt: null,
+          impersonator: { id: admin.id, email: admin.email, name: admin.name, adminAuthAt: t.aa, startedAt: now, expiresAt: now + IMPERSONATION_MAX_MS },
+        };
+      },
+    }),
+
+    // ── Exit "Login as user": restores the Super Admin's own admin session ──
+    CredentialsProvider({
+      id: "impersonate-return",
+      name: "impersonate-return",
+      credentials: { ticket: { label: "Ticket", type: "text" } },
+      async authorize(credentials, req) {
+        const t = verifyToken<{ a: string; t: string; aa: number }>("ret", credentials?.ticket);
+        if (!t) return null;
+        const admin = await activeSuperAdmin(t.a, t.aa);
+        if (!admin) return null;
+        await audit(null, "user.impersonate.end", {
+          ip: ipFromReq(req as { headers?: HeaderBag }), userAgent: uaFromReq(req as { headers?: HeaderBag }),
+          actorId: admin.id, actorEmail: admin.email, entity: "User", entityId: t.t,
+        });
+        const membership = admin.memberships[0];
+        return {
+          id: admin.id,
+          email: admin.email,
+          name: admin.name,
+          image: admin.avatar,
+          isSuperAdmin: true,
+          organizationId: membership?.organizationId ?? null,
+          organizationSlug: membership?.organization?.slug ?? null,
+          role: membership?.role ?? null,
+          adminRole: "SUPER_ADMIN",
+          adminAuthAt: t.aa, // keeps the original 8h admin session window
+          impersonator: null,
+        };
+      },
+    }),
   ],
   callbacks: {
     async jwt({ token, user, trigger, session }) {
@@ -167,6 +238,7 @@ export const authOptions: NextAuthOptions = {
         token.role = user.role;
         token.adminRole = user.adminRole ?? null;
         token.adminAuthAt = user.adminAuthAt ?? null;
+        token.impersonator = user.impersonator ?? null;
       }
       if (trigger === "update" && session) {
         if (session.name) token.name = session.name;
@@ -183,6 +255,9 @@ export const authOptions: NextAuthOptions = {
         session.user.role = token.role as string;
         session.user.adminRole = token.adminRole ?? null;
         session.user.adminAuthAt = token.adminAuthAt ?? null;
+        session.user.impersonator = token.impersonator
+          ? { name: token.impersonator.name, email: token.impersonator.email, expiresAt: token.impersonator.expiresAt }
+          : null;
       }
       return session;
     },

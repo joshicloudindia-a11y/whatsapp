@@ -12,6 +12,7 @@ import {
   registerFailedLogin,
   secretHash,
 } from "@/lib/admin-auth";
+import { resolveStaffLink } from "@/lib/impersonation";
 
 export const dynamic = "force-dynamic";
 
@@ -42,10 +43,12 @@ export async function POST(req: NextRequest) {
 
   let email = "";
   let password = "";
+  let staffKey: unknown = null;
   try {
     const body = await req.json();
     email = String(body?.email ?? "").toLowerCase().trim();
     password = String(body?.password ?? "");
+    staffKey = body?.k ?? null;
   } catch {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
@@ -86,6 +89,15 @@ export async function POST(req: NextRequest) {
   if (!user.isActive || !role) {
     await audit(null, "admin.login.failed", { ...meta, metadata: { reason: !user.isActive ? "inactive" : "not_admin" } });
     return NextResponse.json({ error: GENERIC_ERROR }, { status: 401 });
+  }
+
+  // Admin staff (every role below Super Admin) may only sign in through their personal link.
+  if (role.key !== "SUPER_ADMIN") {
+    const link = await resolveStaffLink(staffKey);
+    if (!link || link.user.id !== user.id) {
+      await audit(null, "admin.login.blocked", { ...meta, metadata: { reason: "personal_link_required", role: role.name } });
+      return NextResponse.json({ error: "Admin staff must sign in with their personal sign-in link. Ask a Super Admin to send you one." }, { status: 403 });
+    }
   }
 
   // Issue a fresh one-time code; invalidate older pending challenges.
