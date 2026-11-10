@@ -56,6 +56,11 @@ const sections: LegalSection[] = [
           <><B>Service failure:</B> your plan could not be activated, or the Service was unavailable for most of the billing period because of a fault on our side.</>,
         ]} />
         <P>Otherwise, payments are not refundable. This includes renewals, unused time after a mid-period cancellation, and downgrades.</P>
+        <P>
+          Decisions made by Meta, such as rejecting a message template, a display name or a WhatsApp Business Account, limiting messaging,
+          or restricting a phone number, are outside our control. On their own, they are not grounds for a refund, except within the 7-day
+          first-purchase window above.
+        </P>
       </>
     ),
   },
@@ -66,6 +71,8 @@ const sections: LegalSection[] = [
       <Callout tone="amber" icon="info">
         WhatsApp messaging and conversation fees are charged by Meta directly to the payment method on your WhatsApp Business Account.
         {" "}{LEGAL.brand} does not collect these fees and cannot refund them. Please contact Meta for billing questions about these charges.
+        If your plan includes prepaid messaging credits bought through {LEGAL.brand}, unused credits carry forward while your account is
+        active and are not refundable or exchangeable for cash.
       </Callout>
     ),
   },
@@ -78,7 +85,20 @@ const sections: LegalSection[] = [
         "Include your organization name, the payment date and amount, and the payment or invoice ID.",
         "We confirm receipt within 2 business days and tell you our decision within 7 business days.",
         "Approved refunds go back to the original payment method through our payment partner (Razorpay). They usually reach your account within 5 to 7 business days, depending on your bank.",
+        "Please contact us before raising a chargeback or payment dispute with your bank. We can usually resolve the issue faster.",
       ]} />
+    ),
+  },
+  {
+    id: "contact",
+    title: "Contact",
+    body: (
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+        <p className="font-semibold text-slate-900">{LEGAL.entity || LEGAL.brand}</p>
+        <p>Email: <Mail /></p>
+        {LEGAL.address && <p>Address: {LEGAL.address}</p>}
+        <p>Website: <a href={LEGAL.site} className="text-green-700 hover:underline">{LEGAL.domain}</a></p>
+      </div>
     ),
   },
 ];

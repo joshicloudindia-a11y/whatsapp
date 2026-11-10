@@ -7,7 +7,7 @@ export const LEGAL = {
   site: "https://www.bulkmarketing.online",
   domain: "bulkmarketing.online",
   /** Registered legal entity operating the service. Shown only when set. */
-  entity: process.env.NEXT_PUBLIC_LEGAL_ENTITY || "",
+  entity: process.env.NEXT_PUBLIC_LEGAL_ENTITY || "Webeside Technology Institute And Company",
   /** Registered office address. Shown only when set. */
   address: process.env.NEXT_PUBLIC_LEGAL_ADDRESS || "",
   email: process.env.NEXT_PUBLIC_SUPPORT_EMAIL || "support@bulkmarketing.online",
