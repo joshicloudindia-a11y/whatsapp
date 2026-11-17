@@ -53,5 +53,7 @@ declare module "next-auth/jwt" {
     adminRole?: string | null;
     adminAuthAt?: number | null;
     impersonator?: Impersonator | null;
+    /** Last time organizationId/role were re-read from the DB. */
+    orgSyncedAt?: number;
   }
 }

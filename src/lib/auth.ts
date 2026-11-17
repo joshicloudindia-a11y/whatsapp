@@ -27,6 +27,9 @@ function uaFromReq(req: { headers?: HeaderBag } | undefined): string | null {
   return (Array.isArray(v) ? v[0] : v) ?? null;
 }
 
+/** How often a signed-in session re-reads its organization membership from the DB. */
+const ORG_SYNC_MS = 60 * 1000;
+
 const userInclude = {
   memberships: {
     where: { isActive: true },
@@ -239,6 +242,21 @@ export const authOptions: NextAuthOptions = {
         token.adminRole = user.adminRole ?? null;
         token.adminAuthAt = user.adminAuthAt ?? null;
         token.impersonator = user.impersonator ?? null;
+        token.orgSyncedAt = Date.now();
+      } else if (token.id && (!token.orgSyncedAt || Date.now() - token.orgSyncedAt > ORG_SYNC_MS)) {
+        // Keep organization + role in step with the DB, so membership changes (added to an org, moved,
+        // removed, role changed) apply within a minute instead of requiring a new sign-in.
+        const memberships = await prisma.organizationMember.findMany({
+          where: { userId: token.id, isActive: true },
+          select: { organizationId: true, role: true, organization: { select: { slug: true } } },
+          orderBy: { createdAt: "asc" },
+          take: 5,
+        });
+        const m = memberships.find((x) => x.organizationId === token.organizationId) ?? memberships[0];
+        token.organizationId = m?.organizationId ?? null;
+        token.organizationSlug = m?.organization.slug ?? null;
+        token.role = m?.role ?? null;
+        token.orgSyncedAt = Date.now();
       }
       if (trigger === "update" && session) {
         if (session.name) token.name = session.name;

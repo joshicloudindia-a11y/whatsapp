@@ -16,7 +16,7 @@ export async function getOrgMember() {
 
 export async function requireOrgMember(opts: { admin?: boolean } = {}) {
   const member = await getOrgMember();
-  if (!member) return { response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) } as const;
+  if (!member) return { response: NextResponse.json({ error: "Your account isn't linked to an active organization. Ask your admin to add you, then refresh the page." }, { status: 401 }) } as const;
   if (opts.admin && member.role !== "ADMIN") {
     return { response: NextResponse.json({ error: "Only organization admins can do this" }, { status: 403 }) } as const;
   }

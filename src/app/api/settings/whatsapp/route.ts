@@ -48,8 +48,14 @@ export async function POST(req: NextRequest) {
   if (!/^\d{5,25}$/.test(wabaId)) return NextResponse.json({ error: "Enter a valid WhatsApp Business Account ID (digits only)" }, { status: 400 });
   if (accessToken.length < 20) return NextResponse.json({ error: "Enter a valid permanent access token" }, { status: 400 });
 
-  const dup = await prisma.whatsappAccount.findFirst({ where: { phoneNumberId }, select: { id: true } });
-  if (dup) return NextResponse.json({ error: "This number is already connected" }, { status: 409 });
+  const dup = await prisma.whatsappAccount.findFirst({ where: { phoneNumberId }, select: { organizationId: true } });
+  if (dup) {
+    return NextResponse.json({
+      error: dup.organizationId === member.organizationId
+        ? "This number is already connected to your organization"
+        : "This number is already connected to another organization. Remove it there first (Settings → WhatsApp → Remove), then connect it here.",
+    }, { status: 409 });
+  }
 
   // Verify credentials with Meta before saving anything.
   let info;
