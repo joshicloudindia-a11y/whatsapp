@@ -4,6 +4,7 @@ import { metaErrorMessage, sendInteractiveMessage } from "@/lib/whatsapp";
 import { pusherServer, PUSHER_EVENTS, conversationChannel, orgChannel } from "@/lib/pusher";
 import { findOrCreateContact, findOrCreateConversation } from "@/lib/messaging";
 import { CALL_EVENTS } from "@/lib/calling-events";
+import { notArchived } from "@/lib/whatsapp-accounts";
 
 /**
  * WhatsApp Business Calling API (Cloud API, Graph signaling + WebRTC media).
@@ -471,7 +472,7 @@ export async function handleCallsEntry(entry: any): Promise<void> {
     for (const change of entry?.changes ?? []) {
       if (change?.field !== "calls" || !change.value) continue;
       const phoneNumberId = change.value.metadata?.phone_number_id;
-      const waAccount = await prisma.whatsappAccount.findFirst({ where: phoneNumberId ? { phoneNumberId } : { wabaId: entry.id } });
+      const waAccount = await prisma.whatsappAccount.findFirst({ where: phoneNumberId ? { phoneNumberId } : { wabaId: entry.id, isActive: true, ...notArchived } });
       if (!waAccount) {
         console.warn(`[calling] No WhatsApp account for phoneNumberId=${phoneNumberId} wabaId=${entry?.id}`);
         continue;

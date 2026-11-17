@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireOrgMember } from "@/lib/org-auth";
 import { getPhoneNumberInfo } from "@/lib/whatsapp";
+import { notArchived, removeWhatsappAccount } from "@/lib/whatsapp-accounts";
 
 type Params = { params: Promise<{ id: string }> };
 const SELECT = {
@@ -16,7 +17,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { id } = await params;
 
   const existing = await prisma.whatsappAccount.findFirst({
-    where: { id, organizationId: member.organizationId },
+    where: { id, organizationId: member.organizationId, ...notArchived },
     select: { id: true, phoneNumberId: true, accessToken: true },
   });
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -52,6 +53,6 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const existing = await prisma.whatsappAccount.findFirst({ where: { id, organizationId: member.organizationId }, select: { id: true } });
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  await prisma.whatsappAccount.delete({ where: { id } });
-  return NextResponse.json({ success: true });
+  const result = await removeWhatsappAccount(id);
+  return NextResponse.json({ success: true, result });
 }

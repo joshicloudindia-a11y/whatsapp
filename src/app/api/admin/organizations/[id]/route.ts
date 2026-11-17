@@ -3,6 +3,7 @@ import type { Plan, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { audit, requireAdmin } from "@/lib/admin-auth";
 import { normalizeWebsite, slugify } from "@/lib/utils";
+import { notArchived } from "@/lib/whatsapp-accounts";
 
 type Params = { params: Promise<{ id: string }> };
 const PLANS: Plan[] = ["TRIAL", "GROWTH", "PRO", "BUSINESS"];
@@ -17,7 +18,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     include: {
       members: { include: { user: { select: { id: true, name: true, email: true, isActive: true, isSuperAdmin: true } } } },
       subscription: true,
-      whatsappAccounts: { select: { id: true, phoneNumber: true, phoneNumberId: true, wabaId: true, displayName: true, isActive: true } },
+      whatsappAccounts: { where: notArchived, select: { id: true, phoneNumber: true, phoneNumberId: true, wabaId: true, displayName: true, isActive: true } },
       _count: { select: { conversations: true, broadcasts: true, contacts: true, templates: true } },
     },
   });

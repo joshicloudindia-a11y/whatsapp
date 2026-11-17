@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { audit, requireAdmin } from "@/lib/admin-auth";
+import { notArchived, removeWhatsappAccount } from "@/lib/whatsapp-accounts";
 
 type Params = { params: Promise<{ id: string }> };
 const str = (v: unknown, max = 255) => String(v ?? "").trim().slice(0, max);
@@ -9,7 +10,7 @@ const str = (v: unknown, max = 255) => String(v ?? "").trim().slice(0, max);
 /** Ensures the account belongs to the organization in the URL (prevents cross-org edits). */
 async function findAccount(organizationId: string, accountId: string | null) {
   if (!accountId) return null;
-  return prisma.whatsappAccount.findFirst({ where: { id: accountId, organizationId }, select: { id: true, phoneNumber: true } });
+  return prisma.whatsappAccount.findFirst({ where: { id: accountId, organizationId, ...notArchived }, select: { id: true, phoneNumber: true } });
 }
 
 export async function POST(req: NextRequest, { params }: Params) {
@@ -77,7 +78,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const acc = await findAccount(organizationId, req.nextUrl.searchParams.get("accountId"));
   if (!acc) return NextResponse.json({ error: "Account not found" }, { status: 404 });
 
-  await prisma.whatsappAccount.delete({ where: { id: acc.id } });
-  await audit(ctx, "whatsapp.delete", { entity: "WhatsappAccount", entityId: acc.id, metadata: { organizationId, phoneNumber: acc.phoneNumber } });
+  const result = await removeWhatsappAccount(acc.id);
+  await audit(ctx, "whatsapp.delete", { entity: "WhatsappAccount", entityId: acc.id, metadata: { organizationId, phoneNumber: acc.phoneNumber, result } });
   return NextResponse.json({ success: true });
 }

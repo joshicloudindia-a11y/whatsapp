@@ -252,7 +252,7 @@ export function WhatsAppSettings({ isAdmin }: { isAdmin: boolean }) {
                       className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">
                       {acc.isActive ? "Disable" : "Enable"}
                     </button>
-                    <button disabled={busyId === acc.id} onClick={() => { if (confirm(`Remove ${acc.displayName}? Incoming messages to this number will stop.`)) act(acc, null, "Number removed"); }}
+                    <button disabled={busyId === acc.id} onClick={() => { if (confirm(`Remove ${acc.displayName}? Incoming messages to this number will stop. Past chats stay in your inbox, and the number can be connected again later.`)) act(acc, null, "Number removed"); }}
                       className="rounded-lg border border-red-100 px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 disabled:opacity-50">
                       Remove
                     </button>

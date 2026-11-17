@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgMember } from "@/lib/org-auth";
 import { resolvePlanConfig } from "@/lib/plans";
+import { notArchived } from "@/lib/whatsapp-accounts";
 
 export async function GET() {
   const { member, response } = await requireOrgMember();
@@ -32,7 +33,7 @@ export async function GET() {
   const [planConfig, members, numbers, automations, broadcastRecipients] = await Promise.all([
     resolvePlanConfig(tier),
     prisma.organizationMember.count({ where: { organizationId, isActive: true } }),
-    prisma.whatsappAccount.count({ where: { organizationId } }),
+    prisma.whatsappAccount.count({ where: { organizationId, ...notArchived } }),
     prisma.automation.count({ where: { organizationId } }),
     prisma.broadcast.aggregate({ where: { organizationId, createdAt: { gte: periodStart } }, _sum: { sentCount: true } }),
   ]);

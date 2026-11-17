@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgMember } from "@/lib/org-auth";
 import { GRAPH_VERSION, getPhoneNumberInfo, subscribeAppToWaba } from "@/lib/whatsapp";
+import { notArchived } from "@/lib/whatsapp-accounts";
 
 const SELECT = {
   id: true, phoneNumber: true, phoneNumberId: true, displayName: true, wabaId: true,
@@ -13,7 +14,7 @@ export async function GET() {
   if (!member) return response;
 
   const accounts = await prisma.whatsappAccount.findMany({
-    where: { organizationId: member.organizationId },
+    where: { organizationId: member.organizationId, ...notArchived },
     select: SELECT,
     orderBy: { createdAt: "desc" },
   });

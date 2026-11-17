@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgMember } from "@/lib/org-auth";
+import { notArchived } from "@/lib/whatsapp-accounts";
 
 export type StepState = "done" | "in_progress" | "todo" | "locked";
 
@@ -28,7 +29,7 @@ export async function GET() {
     sentBroadcasts, draftBroadcasts, activeBots, totalBots,
   ] = await Promise.all([
     prisma.whatsappAccount.count({ where: { organizationId, isActive: true } }),
-    prisma.whatsappAccount.count({ where: { organizationId } }),
+    prisma.whatsappAccount.count({ where: { organizationId, ...notArchived } }),
     prisma.contact.count({ where: { organizationId } }),
     prisma.messageTemplate.count({ where: { organizationId, status: "APPROVED" } }),
     prisma.messageTemplate.count({ where: { organizationId, status: "PENDING" } }),

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgMember } from "@/lib/org-auth";
 import { checkWhatsappAccountsHealth } from "@/lib/whatsapp-health";
+import { notArchived } from "@/lib/whatsapp-accounts";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,7 @@ export async function GET(req: NextRequest) {
   if (!member) return response;
 
   const accounts = await prisma.whatsappAccount.findMany({
-    where: { organizationId: member.organizationId },
+    where: { organizationId: member.organizationId, ...notArchived },
     select: { id: true, phoneNumberId: true, accessToken: true },
     orderBy: { createdAt: "desc" },
   });
