@@ -5,8 +5,11 @@ import { prisma } from "@/lib/prisma";
 import { sendMail } from "@/lib/mailer";
 import { resolveAdminRole, ROLE_SELECT } from "@/lib/admin-roles";
 import {
+  CHALLENGE_PURPOSE,
   OTP_TTL_MS,
   audit,
+  getDummyHash,
+  maskEmail,
   clientIpFrom,
   ipIsThrottled,
   registerFailedLogin,
@@ -16,15 +19,7 @@ import { resolveStaffLink } from "@/lib/impersonation";
 
 export const dynamic = "force-dynamic";
 
-// Used to keep response time constant when the email doesn't exist.
-let dummyHash: Promise<string> | null = null;
-const getDummyHash = () => (dummyHash ??= bcrypt.hash(crypto.randomBytes(16).toString("hex"), 12));
 const GENERIC_ERROR = "Invalid email or password";
-
-function maskEmail(email: string) {
-  const [local, domain] = email.split("@");
-  return `${local.slice(0, 2)}${"*".repeat(Math.max(1, local.length - 2))}@${domain}`;
-}
 
 function adminOtpEmailHtml(name: string, code: string, ip: string | null) {
   return `
@@ -105,10 +100,12 @@ export async function POST(req: NextRequest) {
   const token = crypto.randomBytes(32).toString("base64url");
   const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
 
-  await prisma.adminLoginChallenge.deleteMany({ where: { userId: user.id, usedAt: null } });
+  // Only admin challenges: never touch a pending app sign-in (USER_2FA) challenge.
+  await prisma.adminLoginChallenge.deleteMany({ where: { userId: user.id, usedAt: null, purpose: CHALLENGE_PURPOSE.ADMIN } });
   await prisma.adminLoginChallenge.create({
     data: {
       id: challengeId,
+      purpose: CHALLENGE_PURPOSE.ADMIN,
       userId: user.id,
       tokenHash: secretHash(token),
       codeHash: secretHash(`${challengeId}:${code}`),

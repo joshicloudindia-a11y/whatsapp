@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import bcrypt from "bcryptjs";
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { getServerSession } from "next-auth";
@@ -26,6 +27,22 @@ export const OTP_TTL_MS = 10 * 60 * 1000;
 export const OTP_MAX_ATTEMPTS = 5;
 export const IP_FAILURE_WINDOW_MS = 15 * 60 * 1000;
 export const IP_MAX_FAILURES = 20;
+
+/** AdminLoginChallenge.purpose values: super admin panel OTP vs. app user two-step sign-in. */
+export const CHALLENGE_PURPOSE = { ADMIN: "ADMIN", USER_2FA: "USER_2FA" } as const;
+
+/** Audit actions counted by ipIsThrottled(). */
+export const ADMIN_FAILURE_ACTIONS = ["admin.login.failed", "admin.otp.failed"] as const;
+export const USER_FAILURE_ACTIONS = ["user.login.failed", "user.otp.failed"] as const;
+
+// Used to keep response time constant when the email doesn't exist.
+let dummyHash: Promise<string> | null = null;
+export const getDummyHash = () => (dummyHash ??= bcrypt.hash(crypto.randomBytes(16).toString("hex"), 12));
+
+export function maskEmail(email: string) {
+  const [local, domain] = email.split("@");
+  return `${local.slice(0, 2)}${"*".repeat(Math.max(1, local.length - 2))}@${domain}`;
+}
 
 export function clientIpFrom(h: Headers): string | null {
   const fwd = h.get("x-forwarded-for");
@@ -145,13 +162,16 @@ export async function audit(
   }
 }
 
-/** Too many failed admin logins from this IP recently? */
-export async function ipIsThrottled(ip: string | null): Promise<boolean> {
+/** Too many failed logins from this IP recently? Defaults to admin panel failures. */
+export async function ipIsThrottled(
+  ip: string | null,
+  actions: readonly string[] = ADMIN_FAILURE_ACTIONS
+): Promise<boolean> {
   if (!ip) return false;
   const count = await prisma.auditLog.count({
     where: {
       ip,
-      action: { in: ["admin.login.failed", "admin.otp.failed"] },
+      action: { in: [...actions] },
       createdAt: { gte: new Date(Date.now() - IP_FAILURE_WINDOW_MS) },
     },
   });

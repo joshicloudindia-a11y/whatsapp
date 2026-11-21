@@ -13,7 +13,7 @@ export async function GET() {
     where: { id: session.user.id },
     select: {
       id: true, name: true, email: true, avatar: true, emailVerified: true, createdAt: true, lastLoginAt: true,
-      passwordHash: true,
+      passwordHash: true, twoFactorEnabled: true,
       memberships: {
         where: { isActive: true },
         select: { role: true, joinedAt: true, createdAt: true, organization: { select: { id: true, name: true, slug: true, plan: true } } },

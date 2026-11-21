@@ -4,7 +4,9 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { resolveAdminRole, ROLE_SELECT } from "@/lib/admin-roles";
 import {
+  CHALLENGE_PURPOSE,
   OTP_MAX_ATTEMPTS,
+  USER_FAILURE_ACTIONS,
   audit,
   ipIsThrottled,
   registerFailedLogin,
@@ -53,8 +55,10 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         if (!credentials?.email || !credentials?.password) return null;
+        const ip = ipFromReq(req as { headers?: HeaderBag });
+        if (await ipIsThrottled(ip, USER_FAILURE_ACTIONS)) return null;
 
         const user = await prisma.user.findUnique({
           where: { email: credentials.email.toLowerCase().trim() },
@@ -63,10 +67,17 @@ export const authOptions: NextAuthOptions = {
 
         if (!user || !user.passwordHash || !user.isActive) return null;
         if (user.lockedUntil && user.lockedUntil > new Date()) return null;
+        // Two-step verification on: a password alone never signs in. The login page uses
+        // /api/auth-2fa/start (password check + emailed code) and then the "user-otp" provider.
+        if (user.twoFactorEnabled) return null;
 
         const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
         if (!isValid) {
           await registerFailedLogin(user.id);
+          await audit(null, "user.login.failed", {
+            ip, userAgent: uaFromReq(req as { headers?: HeaderBag }), actorId: user.id, actorEmail: user.email,
+            metadata: { reason: "wrong_password" },
+          });
           return null;
         }
 
@@ -113,7 +124,10 @@ export const authOptions: NextAuthOptions = {
           include: { user: { include: { ...userInclude, adminRoleDef: { select: ROLE_SELECT } } } },
         });
 
-        if (!challenge || challenge.usedAt || challenge.expiresAt < new Date() || challenge.attempts >= OTP_MAX_ATTEMPTS) {
+        if (
+          !challenge || challenge.purpose !== CHALLENGE_PURPOSE.ADMIN ||
+          challenge.usedAt || challenge.expiresAt < new Date() || challenge.attempts >= OTP_MAX_ATTEMPTS
+        ) {
           await audit(null, "admin.otp.failed", { ip, userAgent, metadata: { reason: "invalid_or_expired_challenge" } });
           return null;
         }
@@ -156,6 +170,81 @@ export const authOptions: NextAuthOptions = {
           role: membership?.role ?? null,
           adminRole: role.key,
           adminAuthAt: now.getTime(),
+        };
+      },
+    }),
+
+    // ── Regular app login, step 2 when two-step verification is on (email OTP) ──
+    // Step 1 (password check + code email) lives in /api/auth-2fa/start.
+    CredentialsProvider({
+      id: "user-otp",
+      name: "user-otp",
+      credentials: {
+        challenge: { label: "Challenge", type: "text" },
+        code: { label: "Code", type: "text" },
+      },
+      async authorize(credentials, req) {
+        const ip = ipFromReq(req as { headers?: HeaderBag });
+        const userAgent = uaFromReq(req as { headers?: HeaderBag });
+        const challengeToken = credentials?.challenge?.trim();
+        const code = credentials?.code?.replace(/\D/g, "");
+        if (!challengeToken || !code || code.length !== 6) return null;
+        if (await ipIsThrottled(ip, USER_FAILURE_ACTIONS)) return null;
+
+        const challenge = await prisma.adminLoginChallenge.findUnique({
+          where: { tokenHash: secretHash(challengeToken) },
+          include: { user: { include: userInclude } },
+        });
+
+        if (
+          !challenge || challenge.purpose !== CHALLENGE_PURPOSE.USER_2FA ||
+          challenge.usedAt || challenge.expiresAt < new Date() || challenge.attempts >= OTP_MAX_ATTEMPTS
+        ) {
+          await audit(null, "user.otp.failed", { ip, userAgent, metadata: { reason: "invalid_or_expired_challenge" } });
+          return null;
+        }
+
+        const user = challenge.user;
+        const meta = { ip, userAgent, actorId: user.id, actorEmail: user.email };
+
+        if (!user.isActive || !user.passwordHash || (user.lockedUntil && user.lockedUntil > new Date())) {
+          await audit(null, "user.otp.failed", { ...meta, metadata: { reason: "account_unavailable" } });
+          return null;
+        }
+
+        if (!safeEqualHex(secretHash(`${challenge.id}:${code}`), challenge.codeHash)) {
+          await prisma.adminLoginChallenge.update({ where: { id: challenge.id }, data: { attempts: { increment: 1 } } });
+          const locked = await registerFailedLogin(user.id);
+          await audit(null, "user.otp.failed", { ...meta, metadata: { reason: "wrong_code", locked } });
+          return null;
+        }
+
+        // Single use: only the request that flips usedAt from null wins (guards against parallel replays).
+        const now = new Date();
+        const claimed = await prisma.adminLoginChallenge.updateMany({
+          where: { id: challenge.id, usedAt: null },
+          data: { usedAt: now },
+        });
+        if (claimed.count !== 1) return null;
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: now, lastLoginIp: ip },
+        });
+        await audit(null, "user.login.success", { ...meta, metadata: { method: "password+email_otp" } });
+
+        const membership = user.memberships[0];
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          image: user.avatar,
+          // Shows the "Admin panel" link; real access still requires /admin/login.
+          isSuperAdmin: !!(user.adminRoleId || user.adminRole || user.isSuperAdmin),
+          organizationId: membership?.organizationId ?? null,
+          organizationSlug: membership?.organization?.slug ?? null,
+          role: membership?.role ?? null,
+          adminRole: null,
+          adminAuthAt: null,
         };
       },
     }),

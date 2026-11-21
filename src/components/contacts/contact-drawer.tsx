@@ -12,6 +12,20 @@ import { Avatar, StagePill, TagChip, errMsg, fmt } from "./ui";
 
 const dateFmt = (d: string) => new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 
+const OPT_IN_SOURCES: Record<string, string> = {
+  manual: "added manually", import: "imported with consent", api: "added via API", inbound_message: "messaged you first",
+};
+const optInSourceLabel = (s?: string | null) =>
+  !s ? "" : OPT_IN_SOURCES[s] ?? (s.startsWith("keyword_") ? `replied "${s.slice(8).toUpperCase()}"` : s.replace(/_/g, " "));
+
+/** "Opted in · 12 Nov 2026 · messaged you first" style consent summary (opt-in record). */
+function consentText(c: { optedOut: boolean; optInAt?: string | null; optInSource?: string | null; optOutAt?: string | null }) {
+  const d = (v: string) => new Date(v).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  if (c.optedOut) return c.optOutAt ? `Opted out · ${d(c.optOutAt)}` : "Opted out";
+  if (c.optInAt) return [`Opted in · ${d(c.optInAt)}`, optInSourceLabel(c.optInSource)].filter(Boolean).join(" · ");
+  return "Not recorded";
+}
+
 export function ContactDrawer({ id, canDelete, onClose, onEdit, onChanged }: {
   id: string;
   canDelete: boolean;
@@ -121,6 +135,7 @@ export function ContactDrawer({ id, canDelete, onClose, onEdit, onChanged }: {
               <dl className="rounded-xl border border-slate-100 divide-y divide-slate-100 text-sm">
                 {([
                   ["Email", c.email ?? "—"],
+                  ["WhatsApp consent", consentText(c)],
                   ["Added", dateFmt(c.createdAt)],
                   ["Last seen", c.lastSeenAt ? timeAgo(c.lastSeenAt) : "Never"],
                   ["Last chat", c.latestConversation ? `${c.latestConversation.status.toLowerCase()}${c.latestConversation.lastMessageAt ? ` · ${timeAgo(c.latestConversation.lastMessageAt)}` : ""}` : "—"],

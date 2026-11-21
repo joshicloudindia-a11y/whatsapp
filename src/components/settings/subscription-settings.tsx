@@ -10,6 +10,7 @@ import { useCheckout } from "@/components/billing/use-checkout";
 import { cn } from "@/lib/utils";
 import { Meter, SButton, SettingsCard, SettingsHeader } from "./ui";
 import { LEGAL } from "@/lib/legal";
+import { formatPaymentAmount, formatPaymentDate, paymentStatusBadge } from "@/lib/payment-format";
 
 interface Usage { key: string; label: string; used: number; limit: number; icon: string }
 interface Sub {
@@ -18,6 +19,15 @@ interface Sub {
   currentPeriodStart: string | null; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean; paymentProvider: string | null;
   usagePeriodStart: string; usage: Usage[]; gateways: { stripe: boolean; razorpay: boolean }; canManageBilling: boolean;
 }
+interface PaymentRow {
+  id: string; provider: string; amount: number; currency: string; status: string;
+  plan: string | null; interval: string | null; invoiceNumber: string; paidAt: string;
+}
+interface PaymentsPage { payments: PaymentRow[]; total: number; page: number; limit: number; hasMore: boolean }
+
+const PAGE_SIZE = 10;
+const planLabel = (p: PaymentRow) => [p.plan, p.interval === "annual" ? "Annual" : p.interval === "monthly" ? "Monthly" : p.interval].filter(Boolean).join(" · ") || "Subscription";
+
 interface Plan {
   id: string; name: string; slug: string; description?: string; monthlyPrice: number; annualPrice: number; currency: string;
   isPopular: boolean; features: string[]; maxUsers: number; maxBroadcasts: number; maxWhatsappNumbers: number; maxAutomations: number;
@@ -196,6 +206,106 @@ export function SubscriptionSettings() {
           </div>
         </SettingsCard>
       )}
+
+      {sub.canManageBilling && <PaymentHistory />}
     </div>
+  );
+}
+
+function PaymentHistory() {
+  const [page, setPage] = useState(1);
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["billing-payments", page],
+    queryFn: () => axios.get("/api/billing/payments", { params: { page, limit: PAGE_SIZE } }).then((r) => r.data as PaymentsPage),
+    placeholderData: (prev) => prev,
+  });
+  const rows = data?.payments ?? [];
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1;
+
+  return (
+    <SettingsCard title="Payment history" description="Your payments and downloadable invoices." icon="receipt_long">
+      {isLoading ? (
+        <div className="space-y-2">{[0, 1, 2].map((i) => <div key={i} className="h-12 rounded-xl bg-slate-100 animate-pulse" />)}</div>
+      ) : isError ? (
+        <p className="text-sm text-red-600">Couldn&apos;t load payment history. Please refresh the page.</p>
+      ) : rows.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-400"><Icon name="receipt_long" className="w-5 h-5" /></span>
+          <p className="text-sm font-semibold text-slate-700">No payments yet</p>
+          <p className="text-xs text-slate-500">Invoices for your plan payments will appear here.</p>
+        </div>
+      ) : (
+        <>
+          {/* Desktop table */}
+          <div className="hidden sm:block overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  <th className="py-2 pr-3 font-semibold">Date</th>
+                  <th className="py-2 pr-3 font-semibold">Invoice no.</th>
+                  <th className="py-2 pr-3 font-semibold">Plan</th>
+                  <th className="py-2 pr-3 text-right font-semibold">Amount</th>
+                  <th className="py-2 pr-3 font-semibold">Status</th>
+                  <th className="py-2 text-right font-semibold"><span className="sr-only">Invoice</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((p) => {
+                  const st = paymentStatusBadge(p.status);
+                  return (
+                    <tr key={p.id} className="border-b border-slate-50 last:border-0">
+                      <td className="py-3 pr-3 whitespace-nowrap text-slate-600">{formatPaymentDate(p.paidAt)}</td>
+                      <td className="py-3 pr-3 whitespace-nowrap font-mono text-xs text-slate-700">{p.invoiceNumber}</td>
+                      <td className="py-3 pr-3 text-slate-700">{planLabel(p)}</td>
+                      <td className="py-3 pr-3 whitespace-nowrap text-right font-semibold tabular-nums text-slate-900">{formatPaymentAmount(p.amount, p.currency)}</td>
+                      <td className="py-3 pr-3"><span className={cn("rounded-full px-2 py-0.5 text-[11px] font-bold", st.cls)}>{st.label}</span></td>
+                      <td className="py-3 text-right whitespace-nowrap">
+                        <a href={`/billing/invoice/${p.id}`} target="_blank" rel="noopener" className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 hover:underline">
+                          <Icon name="description" className="w-4 h-4" /> View invoice
+                        </a>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile cards */}
+          <ul className="sm:hidden space-y-2">
+            {rows.map((p) => {
+              const st = paymentStatusBadge(p.status);
+              return (
+                <li key={p.id} className="rounded-xl border border-slate-100 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-900">{planLabel(p)}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">{formatPaymentDate(p.paidAt)} · <span className="font-mono">{p.invoiceNumber}</span></p>
+                    </div>
+                    <p className="shrink-0 text-sm font-bold tabular-nums text-slate-900">{formatPaymentAmount(p.amount, p.currency)}</p>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-bold", st.cls)}>{st.label}</span>
+                    <a href={`/billing/invoice/${p.id}`} target="_blank" rel="noopener" className="inline-flex items-center gap-1 text-xs font-semibold text-green-700">
+                      <Icon name="description" className="w-4 h-4" /> View invoice
+                    </a>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+
+          {totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <p className="text-xs text-slate-500">Page {page} of {totalPages}</p>
+              <div className="flex gap-2">
+                <SButton variant="secondary" disabled={page <= 1} onClick={() => setPage((n) => Math.max(1, n - 1))}>Previous</SButton>
+                <SButton variant="secondary" disabled={!data?.hasMore} onClick={() => setPage((n) => n + 1)}>Next</SButton>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </SettingsCard>
   );
 }

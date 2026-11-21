@@ -66,6 +66,7 @@ export function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: 
   const [hasHeader, setHasHeader] = useState(true);
   const [mapping, setMapping] = useState<Mapping>({ phone: -1, name: -1, email: -1, tags: -1 });
   const [stage, setStage] = useState<Stage>("LEAD");
+  const [consent, setConsent] = useState(false);
   const [extraTag, setExtraTag] = useState("");
   const [dragging, setDragging] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -128,7 +129,7 @@ export function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: 
     setProgress({ done: 0, total: list.length });
     try {
       for (let i = 0; i < list.length; i += BATCH) {
-        const r = await axios.post("/api/contacts/import", { rows: list.slice(i, i + BATCH), stage, tags });
+        const r = await axios.post("/api/contacts/import", { rows: list.slice(i, i + BATCH), stage, tags, consentConfirmed: consent });
         total.imported += r.data.imported;
         const inFile = Number(r.data.duplicateInFile ?? 0);
         total.dupes += inFile;
@@ -292,6 +293,14 @@ export function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: 
               <input value={extraTag} onChange={(e) => setExtraTag(e.target.value)} maxLength={40} placeholder="e.g. expo-2026" className={inputCls} />
             </label>
           </div>
+
+          <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-xs text-slate-600 cursor-pointer">
+            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#25D366]" />
+            <span>
+              <b className="text-slate-800">These contacts agreed to receive WhatsApp messages from us.</b> We record today&apos;s date as their opt-in
+              (source: import). Leave unticked if you don&apos;t have their consent; they can still message you first.
+            </span>
+          </label>
 
           {progress && (
             <div className="h-2 rounded-full bg-slate-100 overflow-hidden">

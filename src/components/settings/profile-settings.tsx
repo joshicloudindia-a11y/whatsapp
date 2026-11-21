@@ -12,6 +12,7 @@ import { SButton, SField, SettingsCard, SettingsHeader, sInput, settingsError } 
 interface Profile {
   id: string; name: string | null; email: string; emailVerified: string | null; createdAt: string; lastLoginAt: string | null;
   hasPassword: boolean;
+  twoFactorEnabled: boolean;
   memberships: { role: string; joinedAt: string | null; createdAt: string; organization: { id: string; name: string; slug: string; plan: string } }[];
 }
 
@@ -41,9 +42,84 @@ function PasswordField({ value, onChange, placeholder, autoComplete }: { value: 
   );
 }
 
+function TwoStepCard({ enabled, canChange, blockedReason }: { enabled: boolean; canChange: boolean; blockedReason?: string }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+  const target = !enabled;
+
+  const cancel = () => { setOpen(false); setPassword(""); };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await axios.post("/api/profile/two-factor", { enabled: target, password });
+      await qc.invalidateQueries({ queryKey: ["profile"] });
+      cancel();
+      toast.success(target ? "Two-step verification turned on" : "Two-step verification turned off");
+    } catch (err) { toast.error(settingsError(err)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <form onSubmit={submit}>
+      <SettingsCard title="Two-step verification" icon="verified_user"
+        description="Add a second step to sign-in: after your password, we email you a 6-digit code."
+        footer={open ? (
+          <>
+            <SButton type="button" variant="secondary" onClick={cancel} disabled={saving}>Cancel</SButton>
+            <SButton type="submit" variant={target ? "primary" : "danger"} loading={saving} disabled={!password}>
+              {target ? "Turn on" : "Turn off"}
+            </SButton>
+          </>
+        ) : undefined}>
+        <div className="flex items-start sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0">
+            <span className={cn("w-9 h-9 rounded-xl flex items-center justify-center shrink-0", enabled ? "bg-green-50 text-green-600" : "bg-amber-50 text-amber-600")}>
+              <Icon name={enabled ? "shield" : "warning"} filled={enabled} className="w-[18px] h-[18px]" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-900">{enabled ? "On" : "Off"}</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {enabled
+                  ? "Signing in needs your password and a code sent to your email. Someone who learns your password still can't get in."
+                  : "Only your password protects this account. Turn this on to require an emailed code at every sign-in."}
+              </p>
+            </div>
+          </div>
+          <button type="button" role="switch" aria-checked={enabled} aria-label="Two-step verification"
+            disabled={!canChange || saving}
+            onClick={() => (open ? cancel() : setOpen(true))}
+            className={cn("relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed",
+              (open ? target : enabled) ? "bg-[#25D366]" : "bg-slate-200")}>
+            <span className={cn("inline-block h-5 w-5 rounded-full bg-white shadow transition-transform", (open ? target : enabled) ? "translate-x-[22px]" : "translate-x-0.5")} />
+          </button>
+        </div>
+
+        {blockedReason && <p className="mt-3 text-xs text-slate-500 flex items-center gap-1.5"><Icon name="info" className="w-3.5 h-3.5 shrink-0" /> {blockedReason}</p>}
+
+        {open && (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3.5 space-y-3">
+            <p className="text-xs text-slate-600">
+              {target
+                ? "Make sure you can receive email at your login address — you'll need a code from it every time you sign in."
+                : "Turning this off makes your password the only thing protecting your account."}
+            </p>
+            <SField label="Confirm with your current password">
+              <PasswordField value={password} onChange={setPassword} autoComplete="current-password" />
+            </SField>
+          </div>
+        )}
+      </SettingsCard>
+    </form>
+  );
+}
+
 export function ProfileSettings() {
   const qc = useQueryClient();
-  const { update } = useSession();
+  const { data: session, update } = useSession();
   const { data, isLoading } = useQuery({
     queryKey: ["profile"],
     queryFn: () => axios.get("/api/profile").then((r) => r.data.user as Profile),
@@ -162,6 +238,16 @@ export function ProfileSettings() {
           </SettingsCard>
         </form>
       )}
+
+      {/* Two-step verification */}
+      <TwoStepCard
+        enabled={data.twoFactorEnabled}
+        canChange={data.hasPassword && !session?.user?.impersonator}
+        blockedReason={
+          session?.user?.impersonator ? "Security settings can't be changed while a Super Admin is signed in as this user."
+            : !data.hasPassword ? "Set a password on your account to use two-step verification." : undefined
+        }
+      />
     </div>
   );
 }

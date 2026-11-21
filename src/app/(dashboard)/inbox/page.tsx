@@ -8,6 +8,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import { useSession } from "next-auth/react";
 import { Icon } from "@/components/ui/icon";
+import { ContactFollowUps } from "@/components/reminders/follow-ups";
 import { STAGES, STAGE_META, type Stage } from "@/components/contacts/shared";
 import { pusherClient, PUSHER_EVENTS, orgChannel, conversationChannel, REALTIME_ENABLED } from "@/lib/pusher";
 import { cn, getInitials, timeAgo } from "@/lib/utils";
@@ -1504,6 +1505,8 @@ function InfoPanel({ detail, meta, onClose, onChanged, onAssign, onStatus, onOpe
             ))}
           </div>
         </section>
+
+        <ContactFollowUps contactId={detail.contact.id} conversationId={detail.id} />
 
         <section className="space-y-2">
           <p className="text-xs font-bold text-slate-700 flex items-center gap-1.5">

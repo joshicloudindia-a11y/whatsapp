@@ -15,6 +15,7 @@ const schema = z.object({
   })).min(1).max(MAX_IMPORT_BATCH),
   stage: z.enum(STAGES).optional(),
   tags: z.array(z.string()).max(10).optional(),
+  consentConfirmed: z.boolean().optional(),
 });
 
 /**
@@ -28,7 +29,8 @@ export async function POST(req: NextRequest) {
 
   const parsed = schema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: `Send between 1 and ${MAX_IMPORT_BATCH} rows per request` }, { status: 400 });
-  const { rows, stage = "LEAD" } = parsed.data;
+  const { rows, stage = "LEAD", consentConfirmed = false } = parsed.data;
+  const optIn = consentConfirmed ? { optInAt: new Date(), optInSource: "import" } : {};
   const extraTags = cleanTags(parsed.data.tags);
 
   let invalid = 0;
@@ -57,7 +59,7 @@ export async function POST(req: NextRequest) {
   let imported = 0;
   if (fresh.length) {
     const r = await prisma.contact.createMany({
-      data: fresh.map((c) => ({ organizationId, phone: c.phone, name: c.name, email: c.email, stage })),
+      data: fresh.map((c) => ({ organizationId, phone: c.phone, name: c.name, email: c.email, stage, ...optIn })),
       skipDuplicates: true,
     });
     imported = r.count;

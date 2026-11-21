@@ -39,6 +39,8 @@ model Organization {
   labels           Label[]
   quickReplies     QuickReply[]
   usageLogs        UsageLog[]
+  reminders        Reminder[]
+  payments         Payment[]
 
   @@index([slug])
 }
@@ -72,6 +74,8 @@ model User {
   lastLoginAt         DateTime?
   lastLoginIp         String?
   sessionsRevokedAt   DateTime?
+  /// Email one-time code required at app sign-in
+  twoFactorEnabled    Boolean    @default(false)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -82,6 +86,8 @@ model User {
   verificationTokens    VerificationToken[]
   passwordResets        PasswordReset[]
   adminLoginChallenges  AdminLoginChallenge[]
+  remindersCreated      Reminder[]           @relation("ReminderCreatedBy")
+  remindersAssigned     Reminder[]           @relation("ReminderAssignee")
   adminRoleDef          AdminRoleDefinition? @relation(fields: [adminRoleId], references: [id], onDelete: SetNull)
 
   @@index([adminRoleId])
@@ -122,6 +128,8 @@ model AdminLoginChallenge {
   expiresAt DateTime
   usedAt    DateTime?
   ip        String?
+  /// ADMIN = super admin panel OTP, USER_2FA = app sign-in second factor
+  purpose   String    @default("ADMIN")
   createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -303,6 +311,10 @@ model Contact {
   stage          ContactStage @default(LEAD)
   isBlocked      Boolean      @default(false)
   optedOut       Boolean      @default(false)
+  /// Opt-in record (WhatsApp policy): when and how consent was given / withdrawn
+  optInAt        DateTime?
+  optInSource    String?
+  optOutAt       DateTime?
   lastSeenAt     DateTime?
   notes          String?      @db.Text
   createdAt      DateTime     @default(now())
@@ -313,6 +325,7 @@ model Contact {
   tags         ContactTag[]
   conversations Conversation[]
   broadcastLogs BroadcastRecipient[]
+  reminders     Reminder[]
 
   @@unique([organizationId, phone])
   @@index([organizationId])
@@ -886,4 +899,59 @@ model MeetingSignal {
 
   @@index([roomId, createdAt])
   @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FOLLOW-UP REMINDERS (CRM)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Reminder {
+  id             String    @id @default(cuid())
+  organizationId String
+  contactId      String
+  conversationId String?
+  createdById    String
+  assignedToId   String?
+  dueAt          DateTime
+  note           String    @db.Text
+  doneAt         DateTime?
+  notifiedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact      Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation("ReminderCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  assignedTo   User?        @relation("ReminderAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, doneAt, dueAt])
+  @@index([contactId])
+  @@index([createdById])
+  @@index([assignedToId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PAYMENTS / INVOICES
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Payment {
+  id                String   @id @default(cuid())
+  organizationId    String
+  provider          String
+  providerPaymentId String   @unique
+  providerOrderId   String?
+  /// Smallest currency unit (paise / cents)
+  amount            Int
+  currency          String   @default("INR")
+  status            String
+  plan              String?
+  interval          String?
+  description       String?
+  invoiceNumber     String   @unique
+  paidAt            DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, paidAt])
 }

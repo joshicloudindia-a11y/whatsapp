@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Icon } from "@/components/ui/icon";
 import { WAIcon } from "@/components/layout/sidebar";
+import { RemindersBell } from "@/components/reminders/follow-ups";
 
 const PAGE_TITLES: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -16,6 +17,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/automation": "Automation",
   "/analytics": "Analytics",
   "/settings": "Settings",
+  "/send-message": "Send Message",
 };
 
 export function Header() {
@@ -30,6 +32,7 @@ export function Header() {
       </Link>
       <h1 className="flex-1 min-w-0 text-base md:text-lg font-semibold text-slate-900 truncate">{title}</h1>
       <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        <RemindersBell />
         {session?.user?.organizationSlug && (
           <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100 rounded-full px-2.5 py-1 max-w-[180px]">
             <Icon name="apartment" className="w-3 h-3" />

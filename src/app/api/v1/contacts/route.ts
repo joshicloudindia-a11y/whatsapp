@@ -65,6 +65,7 @@ export const POST = withApiKey(async (req, { organizationId }) => {
         email: patch.email ?? null,
         stage: patch.stage ?? "LEAD",
         optedOut: patch.optedOut ?? false,
+        ...(!patch.optedOut && { optInAt: new Date(), optInSource: "api" }),
         ...(patch.tags?.length && { tags: { createMany: { data: patch.tags.map((tag) => ({ tag })), skipDuplicates: true } } }),
       },
       select: contactSelect,

@@ -60,6 +60,7 @@ export async function POST(req: NextRequest) {
         notes: b.notes?.trim() || null,
         optedOut: b.optedOut ?? false,
         isBlocked: b.isBlocked ?? false,
+        ...(!b.optedOut && { optInAt: new Date(), optInSource: "manual" }),
         ...(tags.length > 0 && { tags: { createMany: { data: tags.map((tag) => ({ tag })), skipDuplicates: true } } }),
       },
       select: contactListSelect,

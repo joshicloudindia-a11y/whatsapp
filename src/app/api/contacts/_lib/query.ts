@@ -5,6 +5,7 @@ export const CAN_DELETE_ROLES = ["ADMIN", "CAMPAIGN_MANAGER"];
 
 export const contactListSelect = {
   id: true, phone: true, name: true, email: true, stage: true, isBlocked: true, optedOut: true,
+  optInAt: true, optInSource: true, optOutAt: true,
   notes: true, lastSeenAt: true, createdAt: true, updatedAt: true,
   tags: { select: { tag: true }, orderBy: { tag: "asc" } },
   _count: { select: { conversations: true } },

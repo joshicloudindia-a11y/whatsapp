@@ -135,7 +135,7 @@ async function handleInboundMessage(msg: any, waAccount: any, contacts: any[]) {
   })); // [webhooks]
   const contact = await prisma.contact.upsert({
     where: { organizationId_phone: { organizationId: waAccount.organizationId, phone } },
-    create: { organizationId: waAccount.organizationId, phone, name: contactName },
+    create: { organizationId: waAccount.organizationId, phone, name: contactName, optInAt: new Date(), optInSource: "inbound_message" },
     update: { name: contactName ?? undefined, lastSeenAt: new Date() },
   });
 
@@ -243,7 +243,7 @@ async function handleOptKeyword(
   if (!optOut && !OPT_IN_KEYWORDS.has(word)) return false;
 
   try {
-    await prisma.contact.update({ where: { id: contact.id }, data: { optedOut: optOut } });
+    await prisma.contact.update({ where: { id: contact.id }, data: { optedOut: optOut, ...(!optOut && { optInSource: `keyword_${word.replace(/\W+/g, "_").slice(0, 20)}` }) } });
 
     const text = optOut ? OPT_OUT_REPLY : OPT_IN_REPLY;
     let wamid: string | undefined;

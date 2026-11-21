@@ -31,6 +31,9 @@ export interface ContactRow {
   stage: Stage;
   isBlocked: boolean;
   optedOut: boolean;
+  optInAt?: string | null;
+  optInSource?: string | null;
+  optOutAt?: string | null;
   notes: string | null;
   lastSeenAt: string | null;
   createdAt: string;

@@ -80,9 +80,9 @@ export async function POST(req: NextRequest) {
     ],
     success_url: `${appUrl}/dashboard?payment=success`,
     cancel_url: `${appUrl}/dashboard`,
-    metadata: { organizationId: orgId, planSlug: body.planSlug },
+    metadata: { organizationId: orgId, planSlug: body.planSlug, interval: body.interval },
     subscription_data: {
-      metadata: { organizationId: orgId, planSlug: body.planSlug },
+      metadata: { organizationId: orgId, planSlug: body.planSlug, interval: body.interval },
     },
   });
 
