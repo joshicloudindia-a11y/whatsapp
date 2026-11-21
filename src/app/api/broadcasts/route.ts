@@ -2,9 +2,14 @@ import { NextRequest, NextResponse, after } from "next/server";
 import type { ContactStage, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireOrgMember } from "@/lib/org-auth";
+import { templateMediaHeader } from "@/components/templates/template-utils";
 import { broadcastQuota, placeholdersOf, processDueBroadcasts, resolveVars, runBroadcast, type VarSource } from "@/lib/broadcast-runner";
 
 export const maxDuration = 300;
+const isHttpsUrl = (v: string) => {
+  if (v.length > 2000 || /\s/.test(v)) return false;
+  try { const u = new URL(v); return u.protocol === "https:" && !!u.hostname; } catch { return false; }
+};
 const STAGES: ContactStage[] = ["LEAD", "PROSPECT", "CUSTOMER", "CHURNED"];
 const CAN_SEND = ["ADMIN", "CAMPAIGN_MANAGER"];
 
@@ -57,7 +62,7 @@ export async function POST(req: NextRequest) {
   if (name.length < 2) return NextResponse.json({ error: "Give the broadcast a name" }, { status: 400 });
 
   const [template, account] = await Promise.all([
-    prisma.messageTemplate.findFirst({ where: { id: String(body.templateId ?? ""), organizationId }, select: { id: true, status: true, body: true } }),
+    prisma.messageTemplate.findFirst({ where: { id: String(body.templateId ?? ""), organizationId }, select: { id: true, status: true, body: true, headerType: true, buttons: true } }),
     prisma.whatsappAccount.findFirst({ where: { id: String(body.whatsappAccountId ?? ""), organizationId }, select: { id: true, isActive: true } }),
   ]);
   if (!template) return NextResponse.json({ error: "Choose a template" }, { status: 400 });
@@ -72,6 +77,17 @@ export async function POST(req: NextRequest) {
     return { source, value: m?.value ? String(m.value).slice(0, 200) : "" };
   });
   if (mapping.some((m) => m.source === "text" && !m.value)) return NextResponse.json({ error: "Fill in every template variable" }, { status: 400 });
+
+  // Media header (image/video/document): one public https link for every recipient.
+  // Stored after the body values in each recipient's `variables` (the runner reads it from there).
+  const mediaHeader = templateMediaHeader(template);
+  let headerMediaUrl: string | null = null;
+  if (mediaHeader) {
+    headerMediaUrl = String(body.headerMediaUrl ?? "").trim();
+    if (!isHttpsUrl(headerMediaUrl)) {
+      return NextResponse.json({ error: `This template has a ${mediaHeader.toLowerCase()} header. Enter a public https:// link to the file.` }, { status: 400 });
+    }
+  }
 
   // Audience (opted-out and blocked contacts are always excluded).
   const aud = body.audience ?? {};
@@ -112,7 +128,7 @@ export async function POST(req: NextRequest) {
   });
   for (let i = 0; i < contacts.length; i += 1000) {
     await prisma.broadcastRecipient.createMany({
-      data: contacts.slice(i, i + 1000).map((c) => ({ broadcastId: broadcast.id, contactId: c.id, status: "PENDING", variables: resolveVars(mapping, c) })),
+      data: contacts.slice(i, i + 1000).map((c) => ({ broadcastId: broadcast.id, contactId: c.id, status: "PENDING", variables: headerMediaUrl ? [...resolveVars(mapping, c), headerMediaUrl] : resolveVars(mapping, c) })),
     });
   }
 

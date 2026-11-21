@@ -42,7 +42,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: `${existing.status.toLowerCase()} templates can't be edited — duplicate it instead` }, { status: 400 });
 
   if (hasUnsupportedParts(existing))
-    return NextResponse.json({ error: "This template uses media headers or special buttons — edit it in Meta Business Manager, then sync." }, { status: 400 });
+    return NextResponse.json({ error: "This template uses a location header, dynamic links or special buttons — edit it in Meta Business Manager, then sync." }, { status: 400 });
 
   const raw = await req.json().catch(() => null);
   if (!raw || typeof raw !== "object") return NextResponse.json({ error: "Invalid request" }, { status: 400 });

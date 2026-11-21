@@ -1,14 +1,14 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { PhonePreview } from "./template-preview";
 import {
-  LIMITS, TEMPLATE_LANGUAGES, authBodyText, authFooterText, normalizeName, validateDraft, variablesOf,
-  type TemplateButton, type TemplateCategoryT, type TemplateDraft,
+  LIMITS, MEDIA_RULES, SAMPLE_UPLOAD_MAX_LABEL, TEMPLATE_LANGUAGES, authBodyText, authFooterText, normalizeName, sampleFileProblem, validateDraft, variablesOf,
+  type MediaHeaderFormat, type TemplateButton, type TemplateCategoryT, type TemplateDraft,
 } from "./template-utils";
 
 export interface BuilderAccount { id: string; displayName: string; phoneNumber: string }
@@ -26,6 +26,15 @@ const BUTTON_KINDS: { type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER"; label: strin
   { type: "QUICK_REPLY", label: "Quick reply", icon: "chat" },
   { type: "URL", label: "Visit website", icon: "language" },
   { type: "PHONE_NUMBER", label: "Call phone", icon: "smartphone" },
+];
+
+type HeaderKind = "NONE" | "TEXT" | MediaHeaderFormat;
+const HEADER_KINDS: { value: HeaderKind; label: string; icon?: string }[] = [
+  { value: "NONE", label: "None" },
+  { value: "TEXT", label: "Text" },
+  { value: "IMAGE", label: "Image", icon: "image" },
+  { value: "VIDEO", label: "Video", icon: "videocam" },
+  { value: "DOCUMENT", label: "Document", icon: "description" },
 ];
 
 function Counter({ n, max }: { n: number; max: number }) {
@@ -67,6 +76,12 @@ export function TemplateBuilder({
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const [touched, setTouched] = useState(false);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  // Local preview of the uploaded sample (object URL); only the Meta handle is saved.
+  const [sample, setSample] = useState<{ url: string; format: MediaHeaderFormat } | null>(null);
+  const sampleUrlRef = useRef<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  useEffect(() => () => { if (sampleUrlRef.current) URL.revokeObjectURL(sampleUrlRef.current); }, []);
 
   const set = <K extends keyof TemplateDraft>(k: K, v: TemplateDraft[K]) => setD((p) => ({ ...p, [k]: v }));
   const isAuth = d.category === "AUTHENTICATION";
@@ -77,9 +92,61 @@ export function TemplateBuilder({
     phone: d.buttons.filter((b) => b.type === "PHONE_NUMBER").length,
   };
 
+  const media = d.headerMedia;
+  const headerKind: HeaderKind = media ? media.format : d.headerText !== "" ? "TEXT" : "NONE";
   const preview = isAuth
     ? { body: authBodyText(d.auth), footer: authFooterText(d.auth), buttons: [{ type: "OTP", text: d.auth.copyButtonText || "Copy code" }] as TemplateButton[], examples: ["123456"] }
-    : { headerText: d.headerText, body: d.body, footer: d.footer, buttons: d.buttons, examples: d.examples };
+    : {
+        headerText: media ? null : d.headerText, mediaHeader: media?.format ?? null,
+        mediaUrl: media && sample?.format === media.format ? sample.url : null, mediaFileName: media?.fileName || null,
+        body: d.body, footer: d.footer, buttons: d.buttons, examples: d.examples,
+      };
+
+  const setSamplePreview = (next: { url: string; format: MediaHeaderFormat } | null) => {
+    if (sampleUrlRef.current) URL.revokeObjectURL(sampleUrlRef.current);
+    sampleUrlRef.current = next?.url ?? null;
+    setSample(next);
+  };
+
+  const pickHeader = (k: HeaderKind) => {
+    if (k === headerKind) return;
+    setSamplePreview(null);
+    setD((p) => ({
+      ...p,
+      headerText: k === "TEXT" ? p.headerText || " " : "",
+      headerMedia: k === "NONE" || k === "TEXT" ? null : { format: k, handle: "", fileName: "" },
+    }));
+  };
+
+  const uploadSample = async (file: File) => {
+    const format = d.headerMedia?.format;
+    if (!format) return;
+    const bad = sampleFileProblem(format, file);
+    if (bad) { toast.error(bad); return; }
+    setSamplePreview({ url: URL.createObjectURL(file), format });
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("format", format);
+      if (accountId) fd.append("accountId", accountId);
+      const r = await axios.post("/api/templates/media", fd);
+      const { handle, fileName } = r.data as { handle: string; fileName: string };
+      setD((p) => (p.headerMedia?.format === format ? { ...p, headerMedia: { format, handle, fileName } } : p));
+      toast.success("Sample uploaded to Meta");
+    } catch (e) {
+      setSamplePreview(null);
+      toast.error(errMsg(e, "Upload failed"));
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const removeSample = () => {
+    setSamplePreview(null);
+    setD((p) => (p.headerMedia ? { ...p, headerMedia: { ...p.headerMedia, handle: "", fileName: "" } } : p));
+  };
 
   const wrapSelection = (left: string, right = left) => {
     const el = bodyRef.current;
@@ -109,6 +176,7 @@ export function TemplateBuilder({
 
   const save = async (submit: boolean) => {
     setTouched(true);
+    if (uploading) { toast.error("Wait for the sample to finish uploading"); return; }
     if (problem) { toast.error(problem); return; }
     setBusy(submit ? "submit" : "draft");
     setSubmitError(null);
@@ -226,21 +294,58 @@ export function TemplateBuilder({
               ) : (
                 <>
                   {/* Header */}
-                  <Section title="Header" hint="Optional bold title shown above the message."
-                    right={<div className="flex gap-1 p-0.5 bg-slate-100 rounded-lg">
-                      {(["None", "Text"] as const).map((h) => {
-                        const on = (h === "Text") === (d.headerText !== "");
-                        return <button key={h} type="button" onClick={() => set("headerText", h === "Text" ? d.headerText || " " : "")}
-                          className={cn("px-2.5 py-1 text-[11px] font-semibold rounded-md", on ? "bg-white text-slate-900 shadow-sm" : "text-slate-500")}>{h}</button>;
-                      })}
-                    </div>}>
-                    {d.headerText !== "" && (
+                  <Section title="Header" hint="Optional bold title or a picture, video or PDF shown above the message.">
+                    <div className="flex flex-wrap gap-1 p-0.5 bg-slate-100 rounded-lg w-fit max-w-full">
+                      {HEADER_KINDS.map((h) => (
+                        <button key={h.value} type="button" onClick={() => pickHeader(h.value)} aria-pressed={headerKind === h.value}
+                          className={cn("inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-md", headerKind === h.value ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
+                          {h.icon && <Icon name={h.icon} className="w-3.5 h-3.5" />} {h.label}
+                        </button>
+                      ))}
+                    </div>
+                    {headerKind === "TEXT" && (
                       <div className="space-y-1">
                         <input className={input} value={d.headerText.trimStart()} maxLength={LIMITS.header + 10} placeholder="Your order is confirmed"
                           onChange={(e) => set("headerText", e.target.value || " ")} />
                         <div className="flex justify-end"><Counter n={d.headerText.trim().length} max={LIMITS.header} /></div>
                       </div>
                     )}
+                    {media && (() => {
+                      const rule = MEDIA_RULES[media.format];
+                      return (
+                        <div className={cn("rounded-xl border p-3 space-y-2.5", touched && !media.handle && !uploading ? "border-red-300" : "border-slate-200")}>
+                          <input ref={fileRef} type="file" accept={rule.accept} className="hidden"
+                            onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadSample(f); }} />
+                          {media.handle || uploading ? (
+                            <div className="flex items-center gap-2.5">
+                              <span className="w-9 h-9 rounded-lg bg-green-50 text-green-600 flex items-center justify-center shrink-0">
+                                {uploading ? <span className="w-4 h-4 rounded-full border-2 border-green-600 border-t-transparent animate-spin" /> : <Icon name={media.format === "VIDEO" ? "videocam" : media.format === "DOCUMENT" ? "description" : "image"} className="w-5 h-5" />}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold text-slate-800 truncate">{uploading ? "Uploading sample to Meta…" : media.fileName || `Sample ${rule.noun}`}</p>
+                                {!uploading && <p className="text-[11px] text-green-700 flex items-center gap-1"><Icon name="check_circle" className="w-3.5 h-3.5" /> Uploaded to Meta</p>}
+                              </div>
+                              {!uploading && (
+                                <>
+                                  <button type="button" onClick={() => fileRef.current?.click()} className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 hover:border-green-500 hover:text-green-700">Replace</button>
+                                  <button type="button" onClick={removeSample} aria-label="Remove sample" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:bg-red-50 hover:text-red-500"><Icon name="delete" className="w-4 h-4" /></button>
+                                </>
+                              )}
+                            </div>
+                          ) : (
+                            <button type="button" onClick={() => fileRef.current?.click()}
+                              className="w-full rounded-lg border-2 border-dashed border-slate-300 px-3 py-5 flex flex-col items-center gap-1 text-slate-500 hover:border-green-500 hover:text-green-700">
+                              <Icon name="upload" className="w-6 h-6" />
+                              <span className="text-sm font-semibold">Upload sample {rule.noun}</span>
+                              <span className="text-[11px] text-slate-400">{rule.types} (Meta) · max {SAMPLE_UPLOAD_MAX_LABEL} per upload here</span>
+                            </button>
+                          )}
+                          <p className="text-[11px] text-slate-500 leading-snug">
+                            Meta uses this sample only to review the template. You pick the actual {rule.noun} (a public https:// link) each time you send a broadcast.
+                          </p>
+                        </div>
+                      );
+                    })()}
                   </Section>
 
                   {/* Body */}

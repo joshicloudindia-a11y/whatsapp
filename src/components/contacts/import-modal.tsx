@@ -31,6 +31,32 @@ function detect(header: string[]): { mapping: Mapping; hasHeader: boolean } {
   return { mapping: { name: 0, phone: header.length > 1 ? 1 : 0, email: header.length > 2 ? 2 : -1, tags: header.length > 3 ? 3 : -1 }, hasHeader: false };
 }
 
+const EXCEL_RE = /\.(xlsx|xlsm|xls)$/i;
+const isExcel = (f: File) => EXCEL_RE.test(f.name) || f.type.includes("spreadsheetml") || f.type === "application/vnd.ms-excel";
+
+/** Excel cell → the same plain string a CSV export would produce. */
+function excelCell(v: unknown): string {
+  if (v == null) return "";
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? "" : v.toISOString().slice(0, 10);
+  if (typeof v === "number") return Number.isInteger(v) ? v.toFixed(0) : String(v);
+  const s = String(v).trim();
+  // Numbers come through raw (parseNumber below) so long phones keep every digit.
+  if (/^-?\d+(\.\d+)?e[+-]?\d+$/i.test(s)) {
+    const n = Number(s);
+    return Number.isSafeInteger(n) ? n.toFixed(0) : s;
+  }
+  if (/^-?\d+\.0+$/.test(s)) return s.replace(/\.0+$/, "");
+  return s;
+}
+
+/** Reads the first sheet of an .xlsx file in the browser. The parser is loaded on demand. */
+async function parseExcel(file: File): Promise<string[][]> {
+  const { readSheet } = await import("read-excel-file/browser");
+  // Keep numbers as their raw text: 919876543210 must not become 9.19e11 or lose digits.
+  const data = await readSheet<string>(file, { parseNumber: (n) => n });
+  return data.map((r) => r.map(excelCell)).filter((r) => r.some((c) => c.trim()));
+}
+
 const splitTags = (s: string) => s.split(/[;|,]/).map(cleanTag).filter(Boolean);
 
 export function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
@@ -43,13 +69,28 @@ export function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: 
   const [extraTag, setExtraTag] = useState("");
   const [dragging, setDragging] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
-  const [result, setResult] = useState<{ imported: number; skipped: number; invalid: number } | null>(null);
+  const [result, setResult] = useState<{ imported: number; existing: number; dupes: number; invalid: number } | null>(null);
+  const [reading, setReading] = useState(false);
 
   const load = async (file: File | undefined) => {
     if (!file) return;
     if (file.size > MAX_BYTES) return toast.error("File is larger than 5 MB. Split it into smaller files.");
-    if (!/\.(csv|txt)$/i.test(file.name) && !file.type.includes("csv") && !file.type.startsWith("text/")) return toast.error("Please choose a .csv file");
-    const parsed = parseCsv(await file.text());
+    const excel = isExcel(file);
+    if (!excel && !/\.(csv|txt)$/i.test(file.name) && !file.type.includes("csv") && !file.type.startsWith("text/")) return toast.error("Please choose a CSV or Excel (.xlsx) file");
+    let parsed: string[][];
+    setReading(true);
+    try {
+      parsed = excel ? await parseExcel(file) : parseCsv(await file.text());
+    } catch (e) {
+      const code = (e as { code?: string })?.code;
+      return toast.error(
+        code === "XLS_FILE_NOT_SUPPORTED" || /\.xls$/i.test(file.name)
+          ? "Old .xls files aren't supported. Open it in Excel and save as .xlsx (or CSV), then upload again."
+          : "Couldn't read this file. Make sure it's a valid CSV or .xlsx file.",
+      );
+    } finally {
+      setReading(false);
+    }
     if (!parsed.length) return toast.error("This file is empty");
     const d = detect(parsed[0]);
     setFileName(file.name);
@@ -83,18 +124,21 @@ export function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: 
     const list = prepared.rows;
     if (!list.length) return;
     const tags = cleanTag(extraTag) ? [cleanTag(extraTag)] : [];
-    const total = { imported: 0, skipped: prepared.dupes, invalid: prepared.invalid };
+    const total = { imported: 0, existing: 0, dupes: prepared.dupes, invalid: prepared.invalid };
     setProgress({ done: 0, total: list.length });
     try {
       for (let i = 0; i < list.length; i += BATCH) {
         const r = await axios.post("/api/contacts/import", { rows: list.slice(i, i + BATCH), stage, tags });
         total.imported += r.data.imported;
-        total.skipped += r.data.skipped;
+        const inFile = Number(r.data.duplicateInFile ?? 0);
+        total.dupes += inFile;
+        total.existing += r.data.alreadyExists ?? Math.max(0, r.data.skipped - inFile);
         total.invalid += r.data.invalid;
         setProgress({ done: Math.min(list.length, i + BATCH), total: list.length });
       }
       setResult(total);
-      toast.success(`${fmt(total.imported)} contacts imported`);
+      const skipped = total.existing + total.dupes;
+      toast.success(`${fmt(total.imported)} contacts imported${skipped ? ` · ${fmt(skipped)} duplicate${skipped === 1 ? "" : "s"} skipped` : ""}`);
     } catch (e) {
       setResult(total);
       toast.error(errMsg(e, "Import stopped part-way. Already imported rows were saved."));
@@ -119,7 +163,7 @@ export function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: 
     <Modal
       wide
       title="Import contacts"
-      subtitle="Upload a CSV with name, phone, email and tags columns."
+      subtitle="Upload a CSV or Excel file with name, phone, email and tags columns."
       onClose={importing ? () => {} : onClose}
       footer={
         result ? (
@@ -149,27 +193,35 @@ export function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: 
         <div className="text-center py-4">
           <span className="mx-auto w-14 h-14 rounded-2xl bg-green-50 flex items-center justify-center"><Icon name="task_alt" className="w-7 h-7 text-green-600" /></span>
           <p className="mt-3 text-base font-bold text-slate-900">Import finished</p>
-          <div className="mt-4 grid grid-cols-3 gap-2 max-w-sm mx-auto">
-            {([["Imported", result.imported, "text-green-700"], ["Skipped", result.skipped, "text-slate-700"], ["Invalid", result.invalid, "text-red-600"]] as const).map(([k, v, cls]) => (
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2 max-w-md mx-auto">
+            {([["Imported", result.imported, "text-green-700"], ["Already in contacts", result.existing, "text-slate-700"], ["Repeated in file", result.dupes, "text-slate-700"], ["Invalid phone", result.invalid, "text-red-600"]] as const).map(([k, v, cls]) => (
               <div key={k} className="rounded-xl bg-slate-50 p-3"><p className={cn("text-xl font-bold tabular-nums", cls)}>{fmt(v)}</p><p className="text-[11px] text-slate-500">{k}</p></div>
             ))}
           </div>
-          <p className="mt-3 text-xs text-slate-500">Skipped rows were duplicates: numbers already in your contacts or repeated in the file.</p>
+          {result.existing + result.dupes > 0 ? (
+            <p className="mt-3 text-xs text-slate-500">
+              {fmt(result.existing + result.dupes)} duplicate number{result.existing + result.dupes === 1 ? " was" : "s were"} skipped
+              {result.existing > 0 && ` · ${fmt(result.existing)} already saved (not overwritten)`}
+              {result.dupes > 0 && ` · ${fmt(result.dupes)} repeated in the file (first row kept)`}.
+            </p>
+          ) : (
+            <p className="mt-3 text-xs text-slate-500">No duplicate numbers were found.</p>
+          )}
         </div>
       ) : !rows.length ? (
         <div className="space-y-4">
-          <button type="button" onClick={() => fileRef.current?.click()}
+          <button type="button" disabled={reading} onClick={() => fileRef.current?.click()}
             onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
             onDrop={(e) => { e.preventDefault(); setDragging(false); load(e.dataTransfer.files[0]); }}
             className={cn("w-full rounded-2xl border-2 border-dashed px-6 py-10 text-center transition", dragging ? "border-green-500 bg-green-50/50" : "border-slate-300 hover:border-slate-400 hover:bg-slate-50/50")}>
-            <span className="mx-auto w-12 h-12 rounded-2xl bg-green-50 flex items-center justify-center"><Icon name="upload" className="w-6 h-6 text-green-600" /></span>
-            <p className="mt-3 text-sm font-semibold text-slate-800">Drop a CSV here or <span className="text-green-700">browse</span></p>
-            <p className="mt-1 text-xs text-slate-500">Up to 5 MB and {fmt(MAX_ROWS)} rows</p>
+            <span className="mx-auto w-12 h-12 rounded-2xl bg-green-50 flex items-center justify-center">{reading ? <Spinner /> : <Icon name="upload" className="w-6 h-6 text-green-600" />}</span>
+            <p className="mt-3 text-sm font-semibold text-slate-800">{reading ? "Reading file…" : <>Drop a CSV or Excel file here or <span className="text-green-700">browse</span></>}</p>
+            <p className="mt-1 text-xs text-slate-500">.csv or .xlsx · up to 5 MB and {fmt(MAX_ROWS)} rows · Excel uses the first sheet</p>
           </button>
-          <input ref={fileRef} type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={(e) => load(e.target.files?.[0])} />
+          <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx,.xls,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="hidden" onChange={(e) => load(e.target.files?.[0])} />
           <div className="rounded-xl bg-slate-50 p-4 text-xs text-slate-600 space-y-1.5">
             <p className="font-semibold text-slate-700">Tips</p>
-            <p>Phone numbers should include the country code. 10-digit numbers are treated as Indian (+91).</p>
+            <p>Phone numbers should include the country code. 10-digit numbers are treated as Indian (+91). In Excel, numbers stored as numbers are read digit-for-digit.</p>
             <p>Separate multiple tags with a semicolon, e.g. <code className="font-mono">vip;diwali</code>.</p>
             <p>Numbers that already exist in your contacts are skipped, not overwritten.</p>
             <button type="button" onClick={downloadSample} className="inline-flex items-center gap-1 font-semibold text-green-700 hover:underline"><Icon name="download" className="w-3.5 h-3.5" /> Download sample CSV</button>

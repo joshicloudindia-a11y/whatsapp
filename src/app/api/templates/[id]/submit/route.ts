@@ -21,7 +21,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: `This template is already ${t.status.toLowerCase()}` }, { status: 400 });
 
   if (hasUnsupportedParts(t))
-    return NextResponse.json({ error: "This template uses media headers or special buttons — edit it in Meta Business Manager, then sync." }, { status: 400 });
+    return NextResponse.json({ error: "This template uses a location header, dynamic links or special buttons — edit it in Meta Business Manager, then sync." }, { status: 400 });
   const draft = rowToDraft(t);
   const invalid = validateDraft(draft);
   if (invalid) return NextResponse.json({ error: `${invalid}. Edit the template and try again.` }, { status: 400 });

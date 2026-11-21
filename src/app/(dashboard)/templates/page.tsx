@@ -125,7 +125,7 @@ export default function TemplatesPage() {
   const duplicate = (t: Template) => {
     setViewing(null);
     const d = rowToDraft(t);
-    if (hasUnsupportedParts(t)) toast.info("Media headers, dynamic links and special buttons aren't copied");
+    if (hasUnsupportedParts(t)) toast.info("Location headers, dynamic links and special buttons aren't copied");
     setBuilder({ draft: { ...d, name: normalizeName(`${t.name}_copy`) } });
   };
 
@@ -394,7 +394,7 @@ function DetailsModal({ t, onClose, ...a }: CardActions & { t: Template; onClose
               )}
               {hasUnsupportedParts(cur) && (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 flex gap-2.5 text-xs text-slate-600">
-                  <Icon name="info" className="w-4 h-4 mt-0.5 shrink-0" /><p>This template uses media headers, dynamic links or special buttons. Manage it in WhatsApp Business Manager and sync here.</p>
+                  <Icon name="info" className="w-4 h-4 mt-0.5 shrink-0" /><p>This template uses a location header, dynamic links or special buttons. Manage it in WhatsApp Business Manager and sync here.</p>
                 </div>
               )}
               <dl className="rounded-2xl border border-slate-200 divide-y divide-slate-100 text-sm">

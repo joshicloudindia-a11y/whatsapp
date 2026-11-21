@@ -278,6 +278,16 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* ── Delivery funnel (1:1 + broadcasts) ── */}
+      {!isLoading && data?.delivery && (
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+          <Kpi label="Messages attempted" value={data.delivery.attempted} icon="send" color="#0ea5e9" sub={`incl. broadcasts · ${rangeLabel}`} />
+          <Kpi label="Delivered" value={data.delivery.delivered} icon="done_all" color="#25D366" sub={`${data.delivery.deliveryRate}% delivery rate`} />
+          <Kpi label="Read" value={data.delivery.read} icon="visibility" color="#3b82f6" sub={`${data.delivery.readRate}% of delivered`} />
+          <Kpi label="Failed" value={data.delivery.failed} icon="error" color="#ef4444" sub={data.delivery.attempted ? `${Math.round((data.delivery.failed / data.delivery.attempted) * 1000) / 10}% of attempted` : rangeLabel} />
+        </div>
+      )}
+
       {/* ── Charts ── */}
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">

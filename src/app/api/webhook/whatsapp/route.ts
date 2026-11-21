@@ -8,6 +8,7 @@ import { handleCallsEntry } from "@/lib/calling"; // [calls]
 import { emitContactCreated, emitMessageReceived, emitMessageStatus } from "@/lib/outgoing-webhooks"; // [webhooks]
 import { runChatbotForInbound } from "@/lib/chatbot-runtime"; // [chatbot]
 import { runInboundAutomations } from "@/lib/automation-runtime"; // [automation]
+import { recordBroadcastReply } from "@/lib/broadcast-replies"; // [broadcast]
 
 export const dynamic = "force-dynamic";
 
@@ -217,6 +218,9 @@ async function handleInboundMessage(msg: any, waAccount: any, contacts: any[]) {
 
   // [chatbot] Run any active chatbot flow for this message (src/lib/chatbot-runtime.ts). Never throws.
   await runChatbotForInbound({ msg, waAccount, contactId: contact.id, conversationId: conversation.id });
+
+  // [broadcast] First reply after a broadcast counts towards its repliedCount (campaign reports). Never throws.
+  await recordBroadcastReply({ organizationId: waAccount.organizationId, contactId: contact.id, messageId: message.id });
 
   // [automation] Rule-based automations. Keep this AFTER any chatbot call: bots answer keywords first, automations skip their text reply if a bot already replied. Never throws.
   await runInboundAutomations({ organizationId: waAccount.organizationId, whatsappAccount: waAccount, contactId: contact.id, conversationId: conversation.id, messageId: message.id, text: content });

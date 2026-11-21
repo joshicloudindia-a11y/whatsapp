@@ -67,6 +67,53 @@ export const LIMITS = {
   example: 200,
 } as const;
 
+// Media headers (sample uploaded to Meta via the Resumable Upload API).
+export const MEDIA_HEADER_FORMATS = ["IMAGE", "VIDEO", "DOCUMENT"] as const;
+export type MediaHeaderFormat = (typeof MEDIA_HEADER_FORMATS)[number];
+export const isMediaFormat = (v: unknown): v is MediaHeaderFormat => (MEDIA_HEADER_FORMATS as readonly unknown[]).includes(v);
+
+const MB = 1024 * 1024;
+/** Meta's per-format limits for header media. */
+export const MEDIA_RULES: Record<MediaHeaderFormat, { label: string; noun: string; mimes: string[]; accept: string; maxBytes: number; types: string }> = {
+  IMAGE: { label: "Image", noun: "image", mimes: ["image/jpeg", "image/png"], accept: "image/jpeg,image/png,.jpg,.jpeg,.png", maxBytes: 5 * MB, types: "JPG or PNG, up to 5 MB" },
+  VIDEO: { label: "Video", noun: "video", mimes: ["video/mp4"], accept: "video/mp4,.mp4", maxBytes: 16 * MB, types: "MP4, up to 16 MB" },
+  DOCUMENT: { label: "Document", noun: "document", mimes: ["application/pdf"], accept: "application/pdf,.pdf", maxBytes: 100 * MB, types: "PDF, up to 100 MB" },
+};
+/** Our upload route runs on Vercel, whose request body limit is 4.5 MB; keep a margin for multipart overhead. */
+export const SAMPLE_UPLOAD_MAX_BYTES = 4 * MB;
+export const SAMPLE_UPLOAD_MAX_LABEL = "4 MB";
+
+/** Returns a problem with a sample file for a media header, or null when it can be uploaded. */
+export function sampleFileProblem(format: MediaHeaderFormat, file: { type: string; size: number; name: string }): string | null {
+  const r = MEDIA_RULES[format];
+  const mime = file.type || mimeFromName(file.name);
+  if (!r.mimes.includes(mime)) return `Choose a ${r.types.split(",")[0]} file for a ${r.noun} header`;
+  if (file.size <= 0) return "That file is empty";
+  if (file.size > r.maxBytes) return `Meta allows ${r.types}`;
+  if (file.size > SAMPLE_UPLOAD_MAX_BYTES) return `Sample files can be at most ${SAMPLE_UPLOAD_MAX_LABEL} here — use a smaller sample (customers can still receive larger files when you send)`;
+  return null;
+}
+
+export function mimeFromName(name: string): string {
+  const ext = name.toLowerCase().split(".").pop() ?? "";
+  return ({ jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", mp4: "video/mp4", pdf: "application/pdf" } as Record<string, string>)[ext] ?? "";
+}
+
+/** Media header format of a stored template (own or imported), or null. */
+export function templateMediaHeader(t: { headerType?: string | null; buttons?: unknown }): MediaHeaderFormat | null {
+  const ht = t.headerType?.toUpperCase();
+  if (isMediaFormat(ht)) return ht;
+  const m = parseExtras(t.buttons).mediaHeader?.toUpperCase();
+  return isMediaFormat(m) ? m : null;
+}
+
+export interface HeaderMedia {
+  format: MediaHeaderFormat;
+  /** Upload handle returned by Meta (`example.header_handle`). Empty until a sample is uploaded. */
+  handle: string;
+  fileName: string;
+}
+
 export type TemplateButton =
   | { type: "QUICK_REPLY"; text: string }
   | { type: "URL"; text: string; url: string }
@@ -88,6 +135,9 @@ export interface StoredExtras {
   auth?: AuthOptions;
   /** Media header format (IMAGE/VIDEO/DOCUMENT/LOCATION) for templates imported from Meta. */
   mediaHeader?: string;
+  /** Meta upload handle + original file name for media headers created in the builder. */
+  headerHandle?: string;
+  headerFileName?: string;
 }
 
 export function parseExtras(raw: unknown): StoredExtras {
@@ -100,6 +150,8 @@ export function parseExtras(raw: unknown): StoredExtras {
       headerExamples: Array.isArray(o.headerExamples) ? o.headerExamples.map(String) : undefined,
       auth: o.auth,
       mediaHeader: typeof o.mediaHeader === "string" ? o.mediaHeader : undefined,
+      headerHandle: typeof o.headerHandle === "string" ? o.headerHandle : undefined,
+      headerFileName: typeof o.headerFileName === "string" ? o.headerFileName : undefined,
     };
   }
   return { buttons: [], examples: [] };
@@ -111,6 +163,8 @@ export interface TemplateDraft {
   category: TemplateCategoryT;
   language: string;
   headerText: string;
+  /** Media header (IMAGE/VIDEO/DOCUMENT). When set, headerText is ignored. */
+  headerMedia: HeaderMedia | null;
   body: string;
   footer: string;
   buttons: TemplateButton[];
@@ -121,7 +175,7 @@ export interface TemplateDraft {
 export const DEFAULT_AUTH: AuthOptions = { securityRecommendation: true, codeExpiryMinutes: 10, copyButtonText: "Copy code" };
 
 export const emptyDraft = (): TemplateDraft => ({
-  name: "", category: "MARKETING", language: "en", headerText: "", body: "", footer: "", buttons: [], examples: [], auth: { ...DEFAULT_AUTH },
+  name: "", category: "MARKETING", language: "en", headerText: "", headerMedia: null, body: "", footer: "", buttons: [], examples: [], auth: { ...DEFAULT_AUTH },
 });
 
 export const NAME_RE = /^[a-z0-9_]+$/;
@@ -156,9 +210,12 @@ export function validateDraft(d: TemplateDraft): string | null {
     return null;
   }
 
-  if (d.headerText.length > LIMITS.header) return `Header must be at most ${LIMITS.header} characters`;
-  if (/\{\{/.test(d.headerText)) return "Header variables aren't supported here — use a plain text header";
-  if (/[\n*_~]/.test(d.headerText)) return "Header can't contain new lines or formatting characters";
+  if (d.headerMedia) {
+    if (!isMediaFormat(d.headerMedia.format)) return "Choose a valid header type";
+    if (!d.headerMedia.handle.trim()) return `Upload a sample ${MEDIA_RULES[d.headerMedia.format].noun} for the header — Meta needs it to review the template`;
+  } else if (d.headerText.length > LIMITS.header) return `Header must be at most ${LIMITS.header} characters`;
+  if (!d.headerMedia && /\{\{/.test(d.headerText)) return "Header variables aren't supported here — use a plain text header";
+  if (!d.headerMedia && /[\n*_~]/.test(d.headerText)) return "Header can't contain new lines or formatting characters";
 
   const body = d.body.trim();
   if (!body) return "Body text is required";
@@ -224,7 +281,8 @@ export function buildComponents(d: TemplateDraft): object[] {
     return comps;
   }
   const comps: object[] = [];
-  if (d.headerText.trim()) comps.push({ type: "HEADER", format: "TEXT", text: d.headerText.trim() });
+  if (d.headerMedia) comps.push({ type: "HEADER", format: d.headerMedia.format, example: { header_handle: [d.headerMedia.handle.trim()] } });
+  else if (d.headerText.trim()) comps.push({ type: "HEADER", format: "TEXT", text: d.headerText.trim() });
   const body = d.body.trim();
   const vars = variablesOf(body);
   comps.push(vars.length ? { type: "BODY", text: body, example: { body_text: [vars.map((n) => d.examples[n - 1].trim())] } } : { type: "BODY", text: body });
@@ -245,17 +303,19 @@ export function buildComponents(d: TemplateDraft): object[] {
 /** Maps a draft to MessageTemplate columns. */
 export function draftToColumns(d: TemplateDraft) {
   const auth = d.category === "AUTHENTICATION";
-  const header = auth ? "" : d.headerText.trim();
+  const media = auth ? null : d.headerMedia;
+  const header = auth || media ? "" : d.headerText.trim();
   const body = auth ? authBodyText(d.auth) : d.body.trim();
   const vars = variablesOf(body);
   const extras: StoredExtras = auth
     ? { buttons: [{ type: "OTP", otp_type: "COPY_CODE", text: d.auth.copyButtonText.trim() }], examples: [], auth: d.auth }
     : { buttons: orderButtons(d.buttons), examples: vars.map((n) => (d.examples[n - 1] ?? "").trim()) };
+  if (media) Object.assign(extras, { mediaHeader: media.format, headerHandle: media.handle.trim(), headerFileName: media.fileName });
   return {
     name: d.name,
     category: d.category,
     language: d.language,
-    headerType: header ? "TEXT" : null,
+    headerType: media ? media.format : header ? "TEXT" : null,
     headerContent: header || null,
     body,
     footer: (auth ? authFooterText(d.auth) : d.footer.trim()) || null,
@@ -270,11 +330,14 @@ export function rowToDraft(t: {
 }): TemplateDraft {
   const x = parseExtras(t.buttons);
   const category = (TEMPLATE_CATEGORIES as readonly string[]).includes(t.category) ? (t.category as TemplateCategoryT) : "MARKETING";
+  const media = templateMediaHeader(t);
   return {
     name: t.name,
     category,
     language: t.language,
     headerText: t.headerType === "TEXT" ? t.headerContent ?? "" : "",
+    // Imported templates have no reusable handle; the builder asks for a new sample.
+    headerMedia: media ? { format: media, handle: x.headerHandle ?? "", fileName: x.headerFileName ?? "" } : null,
     body: t.body,
     footer: t.footer ?? "",
     buttons: x.buttons.filter((b) => b.type === "QUICK_REPLY" || b.type === "URL" || b.type === "PHONE_NUMBER"),
@@ -297,11 +360,14 @@ export function coerceDraft(input: unknown): TemplateDraft {
     if (r.type === "QUICK_REPLY") return { type: "QUICK_REPLY", text };
     return { type: "OTHER", text };
   });
+  const hm = (o.headerMedia && typeof o.headerMedia === "object" ? o.headerMedia : null) as Record<string, unknown> | null;
+  const hmFormat = typeof hm?.format === "string" ? hm.format.toUpperCase() : "";
   return {
     name: str(o.name, LIMITS.name + 10).trim(),
     category: str(o.category, 32).toUpperCase() as TemplateCategoryT,
     language: str(o.language, 16).trim(),
     headerText: str(o.headerText, 200),
+    headerMedia: hm && isMediaFormat(hmFormat) ? { format: hmFormat, handle: str(hm.handle, 2000).trim(), fileName: str(hm.fileName, 200) } : null,
     body: str(o.body, 2000),
     footer: str(o.footer, 200),
     buttons,
@@ -401,11 +467,13 @@ export function metaToColumns(m: MetaTemplate) {
   };
 }
 
-/** True when a stored template uses parts this builder can't edit (media header, OTP/flow buttons…). */
+/** True when a stored template uses parts this builder can't edit (location header, OTP/flow buttons…). */
 export function hasUnsupportedParts(t: { category: string; headerType: string | null; body?: string; headerContent?: string | null; buttons: unknown }) {
   if (t.category === "AUTHENTICATION") return false;
   const x = parseExtras(t.buttons);
-  if (x.mediaHeader || (t.headerType && t.headerType !== "TEXT")) return true;
+  const fmt = (t.headerType ?? x.mediaHeader ?? "").toUpperCase();
+  if (fmt && fmt !== "TEXT" && !isMediaFormat(fmt)) return true;
+  if (x.mediaHeader && !isMediaFormat(x.mediaHeader.toUpperCase())) return true;
   if (t.headerContent && /\{\{/.test(t.headerContent)) return true;
   return x.buttons.some((b) => b.type !== "QUICK_REPLY" && b.type !== "URL" && b.type !== "PHONE_NUMBER" || (b.type === "URL" && /\{\{/.test(String(b.url))));
 }

@@ -546,3 +546,40 @@ export async function sendMarketingTemplateMessage({ to, templateName, languageC
     template: { name: templateName, language: { code: languageCode }, components },
   });
 }
+
+// ─── Template sample media (Resumable Upload API) ────────────────────────────
+
+/**
+ * Uploads a template header sample (image/video/document) through Meta's Resumable Upload API
+ * and returns the file handle used in `example.header_handle` when creating a template.
+ *  1. POST /{app-id}/uploads?file_name&file_length&file_type&access_token  → { id: "upload:…" }
+ *  2. POST /{upload-id}  (Authorization: OAuth <token>, file_offset: 0, body = bytes) → { h: "<handle>" }
+ * The token must belong to the same Meta app as META_APP_ID.
+ */
+export async function uploadTemplateSampleMedia(
+  accessToken: string,
+  file: { bytes: ArrayBuffer; fileName: string; mimeType: string }
+): Promise<string> {
+  const appId = process.env.META_APP_ID;
+  if (!appId) throw new Error("META_APP_ID is not configured, so template sample media can't be uploaded");
+
+  const qs = new URLSearchParams({
+    file_name: file.fileName,
+    file_length: String(file.bytes.byteLength),
+    file_type: file.mimeType,
+    access_token: accessToken,
+  });
+  const start = await fetch(`${META_API_BASE}/${encodeURIComponent(appId)}/uploads?${qs}`, { method: "POST", cache: "no-store" });
+  const session = (await start.json().catch(() => ({}))) as { id?: string };
+  if (!start.ok || !session.id) throw new Error(metaErrorMessage(session, "Meta didn't start the upload"));
+
+  const up = await fetch(`${META_API_BASE}/${session.id}`, {
+    method: "POST",
+    headers: { Authorization: `OAuth ${accessToken}`, file_offset: "0", "Content-Type": file.mimeType },
+    body: file.bytes,
+    cache: "no-store",
+  });
+  const done = (await up.json().catch(() => ({}))) as { h?: string };
+  if (!up.ok || !done.h) throw new Error(metaErrorMessage(done, "Meta didn't accept the file"));
+  return done.h;
+}

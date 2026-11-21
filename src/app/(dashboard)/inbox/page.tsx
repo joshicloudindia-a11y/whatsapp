@@ -8,6 +8,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import { useSession } from "next-auth/react";
 import { Icon } from "@/components/ui/icon";
+import { STAGES, STAGE_META, type Stage } from "@/components/contacts/shared";
 import { pusherClient, PUSHER_EVENTS, orgChannel, conversationChannel, REALTIME_ENABLED } from "@/lib/pusher";
 import { cn, getInitials, timeAgo } from "@/lib/utils";
 // [chat] WhatsApp-style chat features
@@ -47,6 +48,13 @@ interface Detail {
   labels: { label: { id: string; name: string; color: string } }[];
   whatsappAccount: { displayName: string; phoneNumber: string; isActive: boolean };
   notes: { id: string; content: string; createdAt: string; authorId: string | null; author: { name: string | null; email: string } | null }[];
+  _count: { messages: number };
+}
+interface HistoryConversation {
+  id: string; status: Status | "SNOOZED"; createdAt: string; lastMessageAt: string | null;
+  assignedAgent: { id: string; name: string | null; email: string } | null;
+  whatsappAccount: { displayName: string } | null;
+  lastMessage: { content: string | null; type: string; direction: "INBOUND" | "OUTBOUND"; mediaCaption: string | null; templateName: string | null; createdAt: string } | null;
   _count: { messages: number };
 }
 interface Meta {
@@ -197,7 +205,7 @@ export default function InboxPage() {
       {/* ── Chat ── */}
       <section className={cn("flex-1 min-w-0 min-h-0 flex-col", selectedId ? "flex" : "hidden md:flex")}>
         {selectedId ? (
-          <ChatArea key={selectedId} conversationId={selectedId} meta={meta} onBack={() => select(null)} />
+          <ChatArea key={selectedId} conversationId={selectedId} meta={meta} onBack={() => select(null)} onOpenConversation={select} />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-6 bg-[#f0f2f5]">
             <span className="w-16 h-16 rounded-3xl bg-white shadow-sm flex items-center justify-center"><Icon name="forum" className="w-8 h-8 text-green-600" /></span>
@@ -256,7 +264,7 @@ function ConversationRow({ c, active, onClick }: { c: ListConversation; active: 
 // ═════════════════════════════════════════════════════════════════════════════
 type MsgPages = { pages: { messages: Message[]; page: number; hasMore?: boolean }[]; pageParams: unknown[] };
 
-function ChatArea({ conversationId, meta, onBack }: { conversationId: string; meta?: Meta; onBack: () => void }) {
+function ChatArea({ conversationId, meta, onBack, onOpenConversation }: { conversationId: string; meta?: Meta; onBack: () => void; onOpenConversation: (id: string) => void }) {
   const qc = useQueryClient();
   const scroller = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -330,6 +338,7 @@ function ChatArea({ conversationId, meta, onBack }: { conversationId: string; me
   const refreshAll = () => {
     qc.invalidateQueries({ queryKey: ["messages", conversationId] });
     qc.invalidateQueries({ queryKey: ["conversations"] });
+    qc.invalidateQueries({ queryKey: ["contact-conversations"] });
     refetchDetail();
   };
 
@@ -618,7 +627,7 @@ function ChatArea({ conversationId, meta, onBack }: { conversationId: string; me
         <>
           <div className="xl:hidden fixed inset-0 z-50 bg-slate-950/40 admin-fade" onClick={() => setShowInfo(false)} />
           <aside className="fixed xl:static inset-y-0 right-0 z-50 w-full sm:w-[380px] xl:w-[340px] bg-white border-l border-slate-200 flex flex-col min-h-0 admin-pop xl:animate-none">
-            <InfoPanel detail={detail} meta={meta} onClose={() => setShowInfo(false)} onChanged={refreshAll} onAssign={assign} onStatus={setStatus} />
+            <InfoPanel detail={detail} meta={meta} onClose={() => setShowInfo(false)} onChanged={refreshAll} onAssign={assign} onStatus={setStatus} onOpenConversation={onOpenConversation} />
           </aside>
         </>
       )}
@@ -1360,10 +1369,38 @@ function TemplatePicker({ conversationId, templates, onClose, onDone }: { conver
 }
 
 // ─── Contact / conversation details ──────────────────────────────────────────
-function InfoPanel({ detail, meta, onClose, onChanged, onAssign, onStatus }: {
-  detail: Detail; meta?: Meta; onClose: () => void; onChanged: () => void; onAssign: (id: string) => void; onStatus: (s: Status) => void;
+function InfoPanel({ detail, meta, onClose, onChanged, onAssign, onStatus, onOpenConversation }: {
+  detail: Detail; meta?: Meta; onClose: () => void; onChanged: () => void; onAssign: (id: string) => void; onStatus: (s: Status) => void; onOpenConversation: (id: string) => void;
 }) {
+  const qc = useQueryClient();
   const [note, setNote] = useState("");
+  const [savingStage, setSavingStage] = useState<Stage | null>(null);
+  const contactId = detail.contact.id;
+  const stage = (STAGES as readonly string[]).includes(detail.contact.stage) ? (detail.contact.stage as Stage) : null;
+  const history = useQuery({
+    queryKey: ["contact-conversations", contactId],
+    queryFn: () => axios.get(`/api/contacts/${contactId}/conversations`, { params: { limit: 10 } }).then((r) => r.data as { conversations: HistoryConversation[]; total: number }),
+    staleTime: 30_000,
+  });
+  const changeStage = async (next: Stage) => {
+    if (next === stage || savingStage) return;
+    const key = ["conversation", detail.id];
+    const prev = qc.getQueryData<Detail>(key);
+    setSavingStage(next);
+    qc.setQueryData<Detail>(key, (d) => d && { ...d, contact: { ...d.contact, stage: next } });
+    try {
+      await axios.patch(`/api/contacts/${contactId}`, { stage: next });
+      toast.success(`Marked as ${STAGE_META[next].label}`);
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["contact", contactId] });
+      qc.invalidateQueries({ queryKey: key });
+    } catch (e) {
+      if (prev) qc.setQueryData(key, prev);
+      toast.error(err(e, "Couldn't update stage"));
+    } finally {
+      setSavingStage(null);
+    }
+  };
   const [saving, setSaving] = useState(false);
   const labelIds = detail.labels.map((l) => l.label.id);
   const { data: teams } = useQuery({
@@ -1410,7 +1447,7 @@ function InfoPanel({ detail, meta, onClose, onChanged, onAssign, onStatus }: {
             +{detail.contact.phone} <Icon name="content_copy" className="w-3 h-3" />
           </button>
           <div className="mt-2 flex justify-center gap-1.5 flex-wrap">
-            <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">{detail.contact.stage}</span>
+            <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", stage ? STAGE_META[stage].cls : "bg-blue-50 text-blue-700")}>{stage ? STAGE_META[stage].label : detail.contact.stage}</span>
             {detail.contact.tags.map((t) => <span key={t.tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">#{t.tag}</span>)}
           </div>
         </div>
@@ -1419,7 +1456,6 @@ function InfoPanel({ detail, meta, onClose, onChanged, onAssign, onStatus }: {
           {[
             ["Email", detail.contact.email ?? "—"],
             ["Customer since", new Date(detail.contact.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })],
-            ["Conversations", String(detail.contact._count.conversations)],
             ["Messages here", String(detail._count.messages)],
             ["Via number", detail.whatsappAccount.displayName],
             ["Started", timeAgo(detail.createdAt)],
@@ -1427,6 +1463,23 @@ function InfoPanel({ detail, meta, onClose, onChanged, onAssign, onStatus }: {
             <div key={k} className="rounded-xl bg-slate-50 p-2.5 min-w-0"><dt className="text-[10px] text-slate-400">{k}</dt><dd className="mt-0.5 font-semibold text-slate-800 truncate">{v}</dd></div>
           ))}
         </dl>
+
+        <section className="space-y-2">
+          <p className="text-xs font-bold text-slate-700">Lead stage</p>
+          <div role="radiogroup" aria-label="Lead stage" className="grid grid-cols-4 gap-1.5">
+            {STAGES.map((s) => {
+              const on = stage === s;
+              return (
+                <button key={s} type="button" role="radio" aria-checked={on} disabled={!!savingStage} onClick={() => changeStage(s)}
+                  className={cn("flex items-center justify-center gap-1 rounded-lg border py-1.5 text-[11px] font-semibold transition disabled:cursor-wait",
+                    on ? cn("border-transparent", STAGE_META[s].cls) : "border-slate-200 text-slate-600 hover:bg-slate-50")}>
+                  <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", STAGE_META[s].dot)} />
+                  <span className="truncate">{STAGE_META[s].label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
 
         <section className="space-y-2">
           <p className="text-xs font-bold text-slate-700">Assignment & status</p>
@@ -1450,6 +1503,29 @@ function InfoPanel({ detail, meta, onClose, onChanged, onAssign, onStatus }: {
               </button>
             ))}
           </div>
+        </section>
+
+        <section className="space-y-2">
+          <p className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+            <Icon name="history" className="w-3.5 h-3.5 text-slate-400" /> Customer history
+            <span className="font-normal text-slate-400">· {history.data ? history.data.total : detail.contact._count.conversations} conversation{(history.data?.total ?? detail.contact._count.conversations) === 1 ? "" : "s"}</span>
+          </p>
+          {history.isLoading ? (
+            <div className="space-y-1.5">{[0, 1].map((i) => <div key={i} className="h-14 rounded-xl bg-slate-50 animate-pulse" />)}</div>
+          ) : history.isError ? (
+            <button type="button" onClick={() => history.refetch()} className="w-full rounded-xl bg-slate-50 p-3 text-xs text-slate-500 hover:bg-slate-100">Couldn&apos;t load history. Tap to retry.</button>
+          ) : (
+            <ul className="space-y-1.5">
+              {history.data?.conversations.map((c) => (
+                <li key={c.id}>
+                  <HistoryRow c={c} current={c.id === detail.id} onOpen={() => onOpenConversation(c.id)} />
+                </li>
+              ))}
+              {!!history.data && history.data.total > history.data.conversations.length && (
+                <li className="text-center text-[10px] text-slate-400">Showing the {history.data.conversations.length} most recent</li>
+              )}
+            </ul>
+          )}
         </section>
 
         {!!meta?.labels.length && (
@@ -1492,5 +1568,38 @@ function InfoPanel({ detail, meta, onClose, onChanged, onAssign, onStatus }: {
         </section>
       </div>
     </>
+  );
+}
+
+const HISTORY_STATUS: Record<string, string> = {
+  OPEN: "bg-green-50 text-green-700",
+  PENDING: "bg-amber-50 text-amber-700",
+  RESOLVED: "bg-slate-100 text-slate-600",
+  SNOOZED: "bg-blue-50 text-blue-700",
+};
+const shortDate = (d: string) => new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+
+function HistoryRow({ c, current, onOpen }: { c: HistoryConversation; current: boolean; onOpen: () => void }) {
+  const snippet = c.lastMessage ? messagePreview(c.lastMessage, 80) || preview({ ...c.lastMessage, status: "" }) : "No messages yet";
+  const agent = c.assignedAgent ? c.assignedAgent.name ?? c.assignedAgent.email : null;
+  return (
+    <button type="button" onClick={onOpen} disabled={current} aria-current={current ? "true" : undefined}
+      className={cn("w-full text-left rounded-xl border p-2.5 transition", current ? "border-green-200 bg-green-50/50 cursor-default" : "border-slate-200 hover:border-green-300 hover:bg-green-50/30")}>
+      <div className="flex items-center gap-1.5 text-[10px]">
+        <span className="font-semibold text-slate-700 tabular-nums">{shortDate(c.lastMessageAt ?? c.createdAt)}</span>
+        <span className={cn("rounded-full px-1.5 py-0.5 font-semibold", HISTORY_STATUS[c.status] ?? HISTORY_STATUS.RESOLVED)}>{c.status.charAt(0) + c.status.slice(1).toLowerCase()}</span>
+        {current && <span className="rounded-full bg-green-600 px-1.5 py-0.5 font-semibold text-white">Current</span>}
+        <span className="flex-1" />
+        <span className="text-slate-400 tabular-nums">{c._count.messages} msg</span>
+        {!current && <Icon name="chevron_right" className="w-3.5 h-3.5 text-slate-400" />}
+      </div>
+      <p className="mt-1 text-xs text-slate-600 truncate">
+        {c.lastMessage?.direction === "OUTBOUND" && <span className="text-slate-400">You: </span>}{snippet}
+      </p>
+      <p className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-400 truncate">
+        <Icon name="person" className="w-3 h-3 shrink-0" />
+        <span className="truncate">{agent ?? "Unassigned"}{c.whatsappAccount?.displayName ? ` · via ${c.whatsappAccount.displayName}` : ""}</span>
+      </p>
+    </button>
   );
 }

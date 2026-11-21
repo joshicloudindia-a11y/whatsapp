@@ -1,5 +1,5 @@
 import type { Message, Prisma, WhatsappAccount } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma, type DbTx } from "@/lib/prisma";
 import { metaErrorMessage, sendInteractiveMessage } from "@/lib/whatsapp";
 import { pusherServer, PUSHER_EVENTS, conversationChannel, orgChannel } from "@/lib/pusher";
 import { findOrCreateContact, findOrCreateConversation } from "@/lib/messaging";
@@ -377,7 +377,7 @@ export async function updateCallMessage(
   messageId: string,
   patch: Partial<CallRecord> | ((c: CallRecord) => Partial<CallRecord> | null),
 ): Promise<{ message: Message; call: CallRecord } | null> {
-  const apply = async (tx: Prisma.TransactionClient, lock: boolean) => {
+  const apply = async (tx: DbTx, lock: boolean) => {
     if (lock) await tx.$queryRaw`SELECT id FROM Message WHERE id = ${messageId} FOR UPDATE`;
     const row = await tx.message.findUnique({ where: { id: messageId } });
     const current = row && readCall(row.templateData);

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getMarketingMessagesStatus, sendMarketingTemplateMessage, sendTemplateMessage } from "@/lib/whatsapp";
 import { pusherServer, PUSHER_EVENTS, orgChannel } from "@/lib/pusher";
 import { resolvePlanConfig } from "@/lib/plans";
+import { templateMediaHeader } from "@/components/templates/template-utils";
 
 const BATCH = 50;
 const CONCURRENCY = 5;
@@ -14,6 +15,32 @@ export type VarSource = { source: "name" | "phone" | "email" | "text"; value?: s
 
 export function placeholdersOf(body: string): string[] {
   return [...new Set(body.match(/\{\{\d+\}\}/g) ?? [])].sort((a, b) => Number(a.slice(2, -2)) - Number(b.slice(2, -2)));
+}
+
+/**
+ * Template `components` for one recipient. `vars` holds the body values in placeholder order; for
+ * templates with a media header the broadcast's header link is stored right after them.
+ */
+export function templateSendComponents(
+  template: { body: string; headerType: string | null; buttons: unknown },
+  vars: string[],
+  placeholders = placeholdersOf(template.body),
+): object[] {
+  const components: object[] = [];
+  const media = templateMediaHeader(template);
+  const link = media ? vars[placeholders.length] : undefined;
+  if (media && link) {
+    const kind = media.toLowerCase() as "image" | "video" | "document";
+    const param: Record<string, string> = { link };
+    if (kind === "document") {
+      let name = "";
+      try { name = decodeURIComponent(new URL(link).pathname.split("/").pop() ?? "").trim(); } catch { /* keep Meta's default name */ }
+      if (/\.[a-z0-9]{2,5}$/i.test(name)) param.filename = name.slice(-120);
+    }
+    components.push({ type: "header", parameters: [{ type: kind, [kind]: param }] });
+  }
+  if (placeholders.length) components.push({ type: "body", parameters: placeholders.map((_, k) => ({ type: "text", text: vars[k] ?? "" })) });
+  return components;
 }
 
 export function resolveVars(mapping: VarSource[], contact: { name: string | null; phone: string; email: string | null }) {
@@ -100,7 +127,7 @@ export async function runBroadcast(broadcastId: string, budgetMs = 240_000): Pro
             to: r.contact.phone,
             templateName: b.template!.name,
             languageCode: b.template!.language,
-            components: placeholders.length ? [{ type: "body", parameters: placeholders.map((_, k) => ({ type: "text", text: vars[k] ?? "" })) }] : [],
+            components: templateSendComponents(b.template!, vars, placeholders),
             accessToken: b.whatsappAccount.accessToken,
             phoneNumberId: b.whatsappAccount.phoneNumberId,
           };

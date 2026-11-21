@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgMember } from "@/lib/org-auth";
 import { listMessageTemplates } from "@/lib/whatsapp";
-import { metaToColumns, type MetaTemplate } from "@/components/templates/template-utils";
+import { metaToColumns, parseExtras, type MetaTemplate } from "@/components/templates/template-utils";
 import { activeAccounts, distinctWabas } from "../_lib";
 
 export const maxDuration = 60;
@@ -34,7 +34,7 @@ export async function POST() {
 
   const local = await prisma.messageTemplate.findMany({
     where: { organizationId },
-    select: { id: true, name: true, language: true, status: true, metaTemplateId: true, approvedAt: true },
+    select: { id: true, name: true, language: true, status: true, metaTemplateId: true, approvedAt: true, buttons: true },
   });
   const byKey = new Map(local.map((t) => [`${t.name}|${t.language}`, t]));
   const byMetaId = new Map(local.filter((t) => t.metaTemplateId).map((t) => [t.metaTemplateId!, t]));
@@ -51,7 +51,11 @@ export async function POST() {
     try {
       if (existing) {
         const changed = existing.status !== cols.status || existing.metaTemplateId !== m.id;
-        await prisma.messageTemplate.update({ where: { id: existing.id }, data: { ...cols, approvedAt } });
+        // Keep the sample upload handle of media headers created here, so a rejected template can be resubmitted.
+        const prev = parseExtras(existing.buttons);
+        const keepSample = prev.headerHandle && prev.mediaHeader && prev.mediaHeader === parseExtras(cols.buttons).mediaHeader;
+        const buttons = keepSample ? { ...(cols.buttons as object), headerHandle: prev.headerHandle, headerFileName: prev.headerFileName } : cols.buttons;
+        await prisma.messageTemplate.update({ where: { id: existing.id }, data: { ...cols, buttons, approvedAt } });
         if (changed) updated++;
       } else {
         await prisma.messageTemplate.create({ data: { organizationId, ...cols, approvedAt, submittedAt: null } });

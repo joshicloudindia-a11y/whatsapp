@@ -78,5 +78,8 @@ export async function POST(req: NextRequest) {
     imported,
     skipped: existingSet.size + duplicateInFile + (fresh.length - imported),
     invalid,
+    // Breakdown of `skipped` (additive fields; older clients ignore them).
+    alreadyExists: existingSet.size + (fresh.length - imported),
+    duplicateInFile,
   });
 }

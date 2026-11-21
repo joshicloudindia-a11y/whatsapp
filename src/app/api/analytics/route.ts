@@ -87,6 +87,23 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
+  // Delivery funnel for the period: 1:1 messages (inbox, API, bots) + broadcast recipients.
+  const [msgStatus, recipientStatus] = await Promise.all([
+    prisma.message.groupBy({ by: ["status"], where: { organizationId: orgId, direction: "OUTBOUND", createdAt: { gte: since } }, _count: true }),
+    prisma.broadcastRecipient.groupBy({ by: ["status"], where: { broadcast: { organizationId: orgId }, createdAt: { gte: since } }, _count: true }),
+  ]);
+  const byStatus: Record<string, number> = {};
+  for (const r of [...msgStatus, ...recipientStatus]) byStatus[r.status] = (byStatus[r.status] ?? 0) + r._count;
+  const read = byStatus.READ ?? 0;
+  const delivered = (byStatus.DELIVERED ?? 0) + read;
+  const failed = byStatus.FAILED ?? 0;
+  const attempted = (byStatus.SENT ?? 0) + delivered + failed;
+  const delivery = {
+    attempted, delivered, read, failed,
+    deliveryRate: attempted ? Math.round((delivered / attempted) * 1000) / 10 : 0,
+    readRate: delivered ? Math.round((read / delivered) * 1000) / 10 : 0,
+  };
+
   // Resolve agent names for leaderboard
   const agentIds = agentCounts.map((a) => a.assignedAgentId!).filter(Boolean);
   const agentUsers = agentIds.length
@@ -130,6 +147,7 @@ export async function GET(req: NextRequest) {
       messagesReceived, messagesReceivedTrend: pct(messagesReceived, prevMessagesReceived),
       broadcasts,       broadcastsTrend: pct(broadcasts, prevBroadcasts),
     },
+    delivery,
     convByStatus: statusMap,
     dailyMessages,
     recentBroadcasts,

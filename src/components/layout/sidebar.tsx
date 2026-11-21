@@ -30,6 +30,7 @@ const NAV: { label: string; items: NavItem[] }[] = [
     label: "Engagement",
     items: [
       { href: "/broadcasts", icon: "campaign",    label: "Broadcasts", short: "Send",      adminOnly: false },
+      { href: "/send-message", icon: "send",     label: "Send message", short: "Test send", adminOnly: false },
       { href: "/templates",  icon: "description", label: "Templates",  short: "Templates", adminOnly: false },
       { href: "/chatbots",   icon: "smart_toy",   label: "Chatbots",   short: "Bots",      adminOnly: false },
       { href: "/automation", icon: "bolt",        label: "Automation", short: "Automate",  adminOnly: false },

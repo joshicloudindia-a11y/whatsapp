@@ -52,6 +52,9 @@ const MEDIA_ICON: Record<string, string> = { IMAGE: "image", VIDEO: "videocam", 
 export interface PreviewProps {
   headerText?: string | null;
   mediaHeader?: string | null;
+  /** Local (object) URL of the sample file, shown instead of the placeholder. */
+  mediaUrl?: string | null;
+  mediaFileName?: string | null;
   body: string;
   footer?: string | null;
   buttons?: TemplateButton[];
@@ -61,7 +64,28 @@ export interface PreviewProps {
 }
 
 /** WhatsApp-style message bubble, optionally inside a phone frame. */
-export function MessageBubble({ headerText, mediaHeader, body, footer, buttons = [], examples, compact }: PreviewProps) {
+function MediaHeader({ format, url, fileName }: { format: string; url?: string | null; fileName?: string | null }) {
+  if (url && format === "IMAGE")
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={url} alt="Header sample" className="mb-1.5 w-full max-h-48 rounded-lg object-cover bg-slate-200/70" />;
+  if (url && format === "VIDEO")
+    return <video src={url} muted playsInline controls className="mb-1.5 w-full max-h-48 rounded-lg bg-black" />;
+  if (format === "DOCUMENT" && (url || fileName))
+    return (
+      <div className="mb-1.5 flex items-center gap-2 rounded-lg bg-black/5 px-2.5 py-2">
+        <span className="w-8 h-9 rounded-md bg-red-500 text-white flex items-center justify-center text-[9px] font-bold shrink-0">PDF</span>
+        <span className="min-w-0 text-[12px] font-medium text-slate-800 truncate">{fileName || "document.pdf"}</span>
+      </div>
+    );
+  return (
+    <div className="mb-1.5 h-24 rounded-lg bg-slate-200/70 flex flex-col items-center justify-center text-slate-500">
+      <Icon name={MEDIA_ICON[format] ?? "image"} className="w-7 h-7" />
+      <span className="text-[10px] font-semibold mt-0.5">{format.toLowerCase()}</span>
+    </div>
+  );
+}
+
+export function MessageBubble({ headerText, mediaHeader, mediaUrl, mediaFileName, body, footer, buttons = [], examples, compact }: PreviewProps) {
   const [time] = useState(() => new Date().toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }));
   // WhatsApp shows at most 3 buttons; the rest collapse into "See all options".
   const shown = buttons.length > 3 ? buttons.slice(0, 2) : buttons;
@@ -69,12 +93,7 @@ export function MessageBubble({ headerText, mediaHeader, body, footer, buttons =
     <div className={cn("w-full self-end", compact ? "max-w-full" : "max-w-[92%]")}>
       <div className={cn("relative bg-[#d9fdd3] shadow-sm", buttons.length ? "rounded-t-xl rounded-tr-sm" : "rounded-xl rounded-tr-sm")}>
         <div className="px-2.5 pt-2 pb-1.5">
-          {mediaHeader && (
-            <div className="mb-1.5 h-24 rounded-lg bg-slate-200/70 flex flex-col items-center justify-center text-slate-500">
-              <Icon name={MEDIA_ICON[mediaHeader] ?? "image"} className="w-7 h-7" />
-              <span className="text-[10px] font-semibold mt-0.5">{mediaHeader.toLowerCase()}</span>
-            </div>
-          )}
+          {mediaHeader && <MediaHeader format={mediaHeader} url={mediaUrl} fileName={mediaFileName} />}
           {headerText && <p className="text-[13.5px] font-bold text-slate-900 leading-snug mb-0.5 break-words"><RichText text={headerText} examples={examples} /></p>}
           <p className={cn("text-[13px] text-slate-800 whitespace-pre-wrap break-words leading-snug", compact && "line-clamp-6")}>
             {body ? <RichText text={body} examples={examples} /> : <span className="text-slate-400">Your message body appears here</span>}

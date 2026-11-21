@@ -6,6 +6,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import { Icon } from "@/components/ui/icon";
 import { cn, timeAgo } from "@/lib/utils";
+import { MEDIA_RULES, templateMediaHeader } from "@/components/templates/template-utils";
 
 type BStatus = "DRAFT" | "SCHEDULED" | "RUNNING" | "COMPLETED" | "PAUSED" | "FAILED";
 interface Broadcast {
@@ -26,6 +27,10 @@ type VarSource = { source: "name" | "phone" | "email" | "text"; value: string };
 const err = (e: unknown, f = "Something went wrong") => (e as { response?: { data?: { error?: string } } })?.response?.data?.error ?? f;
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0);
 const fmt = (n: number | null | undefined) => (n ?? 0).toLocaleString("en-IN");
+const isHttpsUrl = (v: string) => {
+  if (v.length > 2000 || /\s/.test(v)) return false;
+  try { const u = new URL(v); return u.protocol === "https:" && !!u.hostname; } catch { return false; }
+};
 const placeholdersOf = (body: string) => [...new Set(body.match(/\{\{\d+\}\}/g) ?? [])].sort((a, b) => Number(a.slice(2, -2)) - Number(b.slice(2, -2)));
 
 const STATUS: Record<BStatus, { label: string; cls: string; icon: string }> = {
@@ -217,6 +222,7 @@ function CreateWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
   const [accountId, setAccountId] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [vars, setVars] = useState<VarSource[]>([]);
+  const [headerMediaUrl, setHeaderMediaUrl] = useState("");
   const [mode, setMode] = useState<"all" | "tags" | "stage">("all");
   const [tags, setTags] = useState<string[]>([]);
   const [stage, setStage] = useState("CUSTOMER");
@@ -252,6 +258,8 @@ function CreateWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
 
   const template = tpl?.find((t) => t.id === templateId) ?? null;
   const placeholders = useMemo(() => (template ? placeholdersOf(template.body) : []), [template]);
+  const mediaHeader = template ? templateMediaHeader(template) : null;
+  const mediaUrlOk = !mediaHeader || isHttpsUrl(headerMediaUrl.trim());
   const [previewIdx, setPreviewIdx] = useState(0);
   const [showMobilePreview, setShowMobilePreview] = useState(false);
   const samples = aud?.sample ?? [];
@@ -267,11 +275,12 @@ function CreateWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
 
   const pickTemplate = (id: string) => {
     setTemplateId(id);
+    setHeaderMediaUrl("");
     const t = tpl?.find((x) => x.id === id);
     setVars(t ? placeholdersOf(t.body).map((_, i) => ({ source: i === 0 ? "name" : "text", value: "" })) : []);
   };
 
-  const step0Ok = name.trim().length >= 2 && accountId && templateId && vars.every((v) => v.source !== "text" || v.value.trim());
+  const step0Ok = name.trim().length >= 2 && accountId && templateId && vars.every((v) => v.source !== "text" || v.value.trim()) && mediaUrlOk;
   const step1Ok = (aud?.eligible ?? 0) > 0 && (mode !== "tags" || tags.length > 0);
   const step2Ok = when !== "later" || (scheduledAt && new Date(scheduledAt).getTime() > openedAt);
 
@@ -280,6 +289,7 @@ function CreateWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
     try {
       const r = await axios.post("/api/broadcasts", {
         name, templateId, whatsappAccountId: accountId, variables: vars,
+        ...(mediaHeader && { headerMediaUrl: headerMediaUrl.trim() }),
         audience: mode === "tags" ? { mode, tags } : mode === "stage" ? { mode, stage } : { mode: "all" },
         scheduledAt: when === "later" ? new Date(scheduledAt).toISOString() : null,
         sendNow: when === "now",
@@ -352,6 +362,17 @@ function CreateWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
                       </div>
                     )}
                   </div>
+                  {mediaHeader && (
+                    <label className="block space-y-1.5">
+                      <span className="text-xs font-semibold text-slate-600">Header media URL ({MEDIA_RULES[mediaHeader].noun})</span>
+                      <input className={cn(input, headerMediaUrl.trim() && !mediaUrlOk && "border-red-300")} value={headerMediaUrl} inputMode="url" maxLength={2000}
+                        onChange={(e) => setHeaderMediaUrl(e.target.value)}
+                        placeholder={mediaHeader === "DOCUMENT" ? "https://example.com/brochure.pdf" : mediaHeader === "VIDEO" ? "https://example.com/promo.mp4" : "https://example.com/offer.jpg"} />
+                      <span className={cn("block text-[11px]", headerMediaUrl.trim() && !mediaUrlOk ? "text-red-500" : "text-slate-500")}>
+                        {headerMediaUrl.trim() && !mediaUrlOk ? "Enter a valid https:// link." : `This template has a ${MEDIA_RULES[mediaHeader].noun} header. Use a public https:// link (${MEDIA_RULES[mediaHeader].types}); everyone gets the same file.`}
+                      </span>
+                    </label>
+                  )}
                   {placeholders.length > 0 && (
                     <div className="space-y-2">
                       <span className="text-xs font-semibold text-slate-600">Personalise variables</span>
@@ -458,6 +479,7 @@ function CreateWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
                 template={template}
                 businessName={accounts.find((a) => a.id === accountId)?.displayName ?? "Your business"}
                 valueFor={valueFor}
+                mediaUrl={mediaHeader && mediaUrlOk ? headerMediaUrl.trim() : null}
                 placeholders={placeholders}
                 recipients={aud?.eligible ?? null}
                 sampleName={sample ? sample.name ?? `+${sample.phone}` : null}
@@ -494,8 +516,8 @@ function CreateWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
 // ─── WhatsApp-style phone preview ────────────────────────────────────────────
 interface PreviewButton { type?: string; text?: string }
 
-function PhonePreview({ template, businessName, valueFor, placeholders, recipients, sampleName, canCycle, onCycle }: {
-  template: Template | null; businessName: string; valueFor: (i: number) => { text: string; missing: boolean };
+function PhonePreview({ template, businessName, valueFor, mediaUrl, placeholders, recipients, sampleName, canCycle, onCycle }: {
+  template: Template | null; businessName: string; valueFor: (i: number) => { text: string; missing: boolean }; mediaUrl?: string | null;
   placeholders: string[]; recipients: number | null; sampleName: string | null; canCycle: boolean; onCycle: () => void;
 }) {
   // Split the body into text + variable segments so values can be highlighted.
@@ -545,7 +567,10 @@ function PhonePreview({ template, businessName, valueFor, placeholders, recipien
           {template ? (
             <div className="max-w-[92%]">
               <div className="rounded-xl rounded-tl-sm bg-white shadow-sm overflow-hidden">
-                {template.headerType && template.headerType !== "TEXT" && template.headerType !== "NONE" ? (
+                {template.headerType === "IMAGE" && mediaUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={mediaUrl} alt="Header" className="w-full max-h-40 object-cover bg-slate-200" />
+                ) : template.headerType && template.headerType !== "TEXT" && template.headerType !== "NONE" ? (
                   <div className="h-24 bg-slate-200 flex flex-col items-center justify-center gap-1 text-slate-500">
                     <Icon name={template.headerType === "VIDEO" ? "videocam" : template.headerType === "DOCUMENT" ? "description" : "image"} className="w-6 h-6" />
                     <span className="text-[9px] font-semibold uppercase">{template.headerType.toLowerCase()}</span>
